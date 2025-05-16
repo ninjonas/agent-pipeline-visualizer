@@ -1,7 +1,7 @@
 import time
 import threading
 from typing import Dict, Any, Optional
-from .agent_interface import AgentInterface
+from ...agent_interface import AgentInterface
 
 class DummyAgent(AgentInterface):
     """
@@ -99,6 +99,6 @@ class DummyAgent(AgentInterface):
                 time.sleep(1)
                 
         except Exception as e:
-            self.error = f"Unexpected error: {str(e)}"
+            self.error = f"Agent error: {str(e)}"
             self.status = "error"
             self.is_running = False

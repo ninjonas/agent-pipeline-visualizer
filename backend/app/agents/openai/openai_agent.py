@@ -3,7 +3,7 @@ import threading
 import httpx
 import json
 from typing import Dict, Any, Optional
-from .agent_interface import AgentInterface
+from ...agent_interface import AgentInterface
 
 class OpenAIAgent(AgentInterface):
     """
@@ -100,59 +100,44 @@ class OpenAIAgent(AgentInterface):
             self.error = f"Unexpected error: {str(e)}"
             self.status = "error"
             return {"error": self.error}
-
+    
     def _run_agent(self):
-        """Background thread function to test the connection and then wait for queries"""
+        """Background thread function that simulates agent initialization"""
         try:
-            # Test the connection to OpenAI
+            # Simulate connection test
             self.status = "testing connection"
             
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": "gpt-3.5-turbo",
-                "messages": [
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": "Respond with 'Connection successful'"}
-                ],
-                "temperature": 0.3,
-                "max_tokens": 100
-            }
-            
-            response = httpx.post(
-                f"{self.api_base}/chat/completions", 
-                headers=headers,
-                json=payload,
-                timeout=30.0
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                self.last_response = result["choices"][0]["message"]["content"]
-                self.status = "idle"
-            else:
-                self.error = f"API Error: {response.status_code} - {response.text}"
+            # Simple connection test
+            try:
+                headers = {"Authorization": f"Bearer {self.api_key}"}
+                response = httpx.get(
+                    f"{self.api_base}/models", 
+                    headers=headers,
+                    timeout=10.0
+                )
+                
+                if response.status_code == 200:
+                    self.last_response = "OpenAI connection established"
+                else:
+                    self.error = f"Connection test failed: {response.status_code}"
+                    self.status = "error"
+                    self.is_running = False
+                    return
+                    
+            except Exception as e:
+                self.error = f"Connection test error: {str(e)}"
                 self.status = "error"
                 self.is_running = False
                 return
             
-            # Main agent loop - just wait for explicit queries
+            # If we get here, we're good to go
+            self.status = "idle"
+            
+            # Main agent loop - just keep thread alive until stopped
             while self.is_running:
                 time.sleep(1)
                 
-        except httpx.HTTPError as e:
-            self.error = f"HTTP Error: {str(e)}"
-            self.status = "error"
-            self.is_running = False
         except Exception as e:
-            self.error = f"Unexpected error: {str(e)}"
+            self.error = f"Agent error: {str(e)}"
             self.status = "error"
             self.is_running = False
-            
-
-# Create a default OpenAI agent instance
-# This will be registered in the factory by __init__.py
-default_agent = OpenAIAgent()

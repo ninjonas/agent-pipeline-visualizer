@@ -1,7 +1,7 @@
 import time
 import threading
 from typing import Dict, Any, Optional, List
-from .agent_interface import AgentInterface
+from ...agent_interface import AgentInterface
 
 class CustomAgent(AgentInterface):
     """
@@ -107,31 +107,38 @@ class CustomAgent(AgentInterface):
             
             return {
                 "response": response,
-                "model_used": self.model_path,
-                "tokens_used": len(prompt.split()) * 2  # Crude estimation
+                "metadata": {
+                    "model": self.model_path,
+                    "conversation_length": len(self.conversation_history),
+                    "temperature": self.temperature,
+                    "max_tokens": self.max_tokens
+                }
             }
             
         except Exception as e:
-            self.error = f"Custom Agent Error: {str(e)}"
+            self.error = f"Unexpected error: {str(e)}"
             self.status = "error"
             return {"error": self.error}
     
     def _run_agent(self):
-        """Background thread function for the agent"""
+        """Background thread function that loads the LLM"""
         try:
-            # Simulate loading a model
+            # Simulate model loading
             self.status = "loading model"
-            time.sleep(2.0)
+            time.sleep(3.0)  # Simulate loading delay
             
-            # Simulate model ready
-            self.last_response = f"Custom model {self.model_path} loaded successfully"
+            # Simulate model initialization
+            self.status = "initializing model"
+            time.sleep(2.0)  # Simulate initialization delay
+            
+            self.last_response = f"Custom agent loaded with model: {self.model_path}"
             self.status = "idle"
             
-            # Main agent loop
+            # Main agent loop - just keep thread alive until stopped
             while self.is_running:
                 time.sleep(1)
                 
         except Exception as e:
-            self.error = f"Custom Agent Error: {str(e)}"
+            self.error = f"Agent error: {str(e)}"
             self.status = "error"
             self.is_running = False

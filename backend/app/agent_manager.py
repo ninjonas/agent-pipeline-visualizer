@@ -73,6 +73,10 @@ class AgentManager:
         agent_dir = os.path.join(self.base_dir, agent_id)
         os.makedirs(agent_dir, exist_ok=True)
         
+        # Create a subdirectory for agent-specific implementation files
+        impl_dir = os.path.join(agent_dir, "implementation")
+        os.makedirs(impl_dir, exist_ok=True)
+        
         # Store the configuration
         agent_config = {
             'agent_id': agent_id,
@@ -115,7 +119,7 @@ class AgentManager:
             self.agents[agent_id].stop()
         
         # Remove from active agents dictionary
-        agent = self.agents.pop(agent_id)
+        self.agents.pop(agent_id)
         
         # Delete the agent directory
         agent_dir = os.path.join(self.base_dir, agent_id)
@@ -154,9 +158,9 @@ class AgentManager:
             
             if os.path.exists(config_path):
                 try:
-                    with open(config_path, 'r') as f:
+                    with open(config_path, 'r', encoding='utf-8') as f:
                         config = json.load(f)
-                except:
+                except Exception:
                     pass
             
             # Get status
