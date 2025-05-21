@@ -1,225 +1,220 @@
 # Agent Pipeline Visualizer
 
-A web application that visualizes AI agent pipelines using a flexible agent interface system with a Flask API backend and a Next.js frontend.
-
-## Quick Start
-
-To start both the backend and frontend servers in development mode:
-
-```bash
-./run.sh dev
-```
-
-This will start:
-- Flask backend on http://localhost:4000
-- Next.js frontend on http://localhost:3000
-
-If either the backend or frontend server crashes unexpectedly, the script will automatically detect this and shut down both servers to prevent orphaned processes.
+A web application for visualizing multi-step agent workflows, with a Next.js TypeScript frontend and Python Flask backend.
 
 ## Project Structure
 
 ```
 agent-pipeline-visualizer/
-├── backend/                 # Flask backend
-│   ├── app.py               # Main Flask application
-│   ├── requirements.txt     # Python dependencies
-│   └── app/                 # Application modules
-│       ├── __init__.py      # Package initialization
-│       ├── agent_interface.py # Base agent interface
-│       ├── agent.py         # OpenAI agent implementation
-│       ├── dummy_agent.py   # Dummy agent for testing
-│       ├── custom_agent.py  # Example custom agent
-│       └── agent_factory.py # Factory for creating agents
-├── frontend/                # Next.js frontend
-│   ├── package.json         # JavaScript dependencies
-│   ├── public/              # Static files
-│   ├── next.config.mjs      # Next.js configuration
-│   └── src/                 # Source code
-│       └── app/             # Next.js app directory
-├── run.sh                   # Startup script
-└── kill_servers.sh          # Shutdown script
+├── frontend/          # Next.js TypeScript frontend
+├── backend/           # Flask Python backend
+├── agent/             # Dummy agent implementation for developers to reference
+├── run.sh             # Development script to manage both services
+└── build_prod.sh      # Production build script
 ```
 
-## Prerequisites
+## Features
 
-- Python 3.8 or higher
-- Node.js 16 or higher
-- npm 7 or higher
+- **Frontend**: Next.js v14+ with TypeScript and Tailwind CSS (Port 3000)
+- **Backend**: Flask REST API with CORS support (Port 4000)
+- **WebSocket Support**: Real-time updates with no UI flickering during step execution
+- **Agent Integration**: Reference implementation of a multi-step agent pipeline
+- **Pipeline Visualization**: Interactive dashboard to monitor agent workflows
+- **Build Scripts**:
+  - Development script to run both servers with automatic port management
+  - Production build script for deployment-ready builds
 
-## Getting Started
+## Requirements
 
-### Agent Interface System
+- Node.js and npm
+- Python 3.8+
+- Bash shell (for the build scripts)
 
-The application is built around a flexible agent interface system that allows developers to implement and use different AI agent backends. This is implemented using Python's abstract base classes and a factory pattern.
+## Setup
 
-#### Available Agent Types
-
-- **OpenAIAgent**: Uses the OpenAI API to provide responses
-- **DummyAgent**: A simple agent that echoes back the input (for testing)
-- **CustomAgent**: An example template for creating custom agent implementations
-
-#### Creating Custom Agents
-
-To create your own agent implementation:
-
-1. Create a new Python file in the `backend/app/` directory
-2. Implement the `AgentInterface` abstract class
-3. Register your agent with the `AgentFactory`
-
-Example:
-
-```python
-# my_agent.py
-from app.agent_interface import AgentInterface
-from app.agent_factory import AgentFactory
-from typing import Dict, Any
-
-class MyAgent(AgentInterface):
-    def __init__(self, custom_param=None):
-        self.custom_param = custom_param
-        self.status = "idle"
-        self.last_response = None
-        self.error = None
-        self.is_running = False
-        self.status_thread = None
-        
-    def start(self) -> Dict[str, str]:
-        # Implementation
-        pass
-        
-    def stop(self) -> Dict[str, str]:
-        # Implementation
-        pass
-        
-    def get_status(self) -> Dict[str, Any]:
-        # Implementation
-        pass
-        
-    def query_agent(self, prompt: str) -> Dict[str, Any]:
-        # Implementation
-        pass
-
-# Register with factory
-AgentFactory.register_agent("my_agent", MyAgent)
-```
-
-#### API Endpoints for Agent Management
-
-The backend exposes the following API endpoints for agent management:
-
-- `GET /api/agent/types`: Get available agent types
-- `POST /api/agent/create`: Create a new agent instance
-- `POST /api/agent/start`: Start the current agent
-- `POST /api/agent/stop`: Stop the current agent
-- `GET /api/agent/status`: Get the current agent status
-- `POST /api/agent/query`: Send a query to the agent
-
-### Initial Setup
-
-Run the setup script to install all dependencies for both the backend and frontend:
+### Frontend
 
 ```bash
-./run.sh setup
+cd frontend
+npm install
 ```
 
-### Development Mode
+### Backend
 
-To start both the backend and frontend servers in development mode:
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+## Running the Application
+
+### Development
+
+Use the development script to run both frontend and backend with WebSocket support:
 
 ```bash
 ./run.sh dev
 ```
 
-This will start:
-- Flask backend on http://localhost:4000
-- Next.js frontend on http://localhost:3000
+This will:
 
-### Port Management
-
-The application uses specific ports that need to be available:
-- Backend: port 4000
-- Frontend: port 3000
-
-If you encounter any port conflicts, you can use the provided script to kill any processes using these ports:
-
-```bash
-./kill_servers.sh
-```
-
-This script will automatically detect and terminate any processes using ports 3000 and 4000.
+- Kill any processes running on ports 3000 and 4000
+- Start the Next.js frontend with WebSocket support on port 3000
+- Start the Flask backend with WebSocket support on port 4000
+- Enable real-time updates with no UI flickering during step execution
 
 ### Production Build
 
-To build the frontend for production:
+To build the application for production:
 
 ```bash
-./run.sh build
+./build_prod.sh
 ```
 
-### Starting Production Servers
+This will:
 
-To start both servers in production mode:
+- Build the Next.js application for production
+- Prepare the Flask backend with Gunicorn for production
+- Create startup scripts for both frontend and backend
 
-```bash
-./run.sh start
-```
+### Running in Production
 
-### Stopping Servers
-
-To stop all running servers:
+After building, you can run the production versions using:
 
 ```bash
-./run.sh stop
+# Start the frontend (in one terminal)
+./start_frontend.sh
+
+# Start the backend (in another terminal)
+./start_backend.sh
 ```
 
 ## API Endpoints
 
-The Flask backend provides the following API endpoints:
+### Basic Endpoints
 
-- `GET /api/health` - Health check endpoint
+- `GET /api/status` - Returns the status of the backend
 - `GET /api/data` - Returns sample data
-- `POST /api/echo` - Echoes back the posted data
 
-## Features
+### Agent API Endpoints
 
-- Flask backend with API endpoints
-- Next.js frontend with TypeScript
+- `POST /api/agent/register` - Register a new pipeline
+
+### WebSocket Events
+
+- `connect` - Client connection event
+- `disconnect` - Client disconnection event
+- `subscribe_pipeline` - Subscribe to updates for a specific pipeline
+- `subscribe_all_pipelines` - Subscribe to updates for all pipelines
+- `pipeline_updated` - Emitted when a pipeline is updated
+- `step_updated` - Emitted when a step is updated
+- `step_started` - Emitted when a step execution begins
+- `pipelines_list_updated` - Emitted when the pipelines list changes
+- `POST /api/agent/update` - Update a pipeline step status
+- `GET /api/agent/status/<pipeline_id>` - Get the status of a specific pipeline
+- `GET /api/agent/pipelines` - List all registered pipelines
+- `POST /api/agent/execute` - Execute a specific step in a pipeline (for UI triggering)
+
+## Frontend Pages
+
+- `/` - Main page with connection status to the backend
+- `/agent` - Agent pipeline visualization dashboard
+
+## Development Notes
+
+### Port Management
+
+The application is configured to use specific ports:
+
+- Frontend: Port 3000
+- Backend: Port 4000
+
+The build scripts automatically handle killing any existing processes on these ports before starting the services.
+
+### Backend Features
+
+- CORS support for API endpoints
+- Request logging middleware
+- Error handling for 404 and 500 errors
+
+### Frontend Features
+
+- TypeScript support
 - Tailwind CSS for styling
-- CORS disabled for development
-- API proxy configuration
-- Build and run script
+- API utilities for backend communication
 
-## Troubleshooting
+## Extending the Application
 
-### Port 4000 is already in use
+### Adding New API Endpoints
 
-If you see an error like "Port 4000 is already in use", you can:
+1. Edit `backend/app.py` to add new route handlers
+2. Use the existing pattern:
 
-1. Stop the process using that port:
-   ```bash
-   lsof -i:4000  # To find the process ID
-   kill <PID>    # To kill the process
-   ```
+```python
+@app.route('/api/your-endpoint', methods=['GET'])
+def your_endpoint():
+    return jsonify({
+        'data': 'Your response data'
+    })
+```
 
-2. Or modify the `app.py` file to use a different port:
-   ```python
-   port = int(os.environ.get('PORT', 5001))  # Change to an available port
-   ```
-   
-   Remember to also update the port in `next.config.mjs` and `apiService.ts` files.
+### Adding New Frontend Pages
 
-### Next.js Configuration Issues
+1. Create new files in `frontend/src/app` directory
+2. Follow the Next.js App Router conventions
 
-If you encounter ESM module issues with Next.js configuration:
+## Agent Integration
 
-1. Make sure your config file uses the correct export syntax:
-   ```js
-   // Use 'export default' instead of 'module.exports' in .mjs files
-   export default nextConfig;
-   ```
+The application includes a reference agent implementation that demonstrates how to integrate with the pipeline visualization system.
 
-2. Check for duplicate configuration files (like both .mjs and .ts versions).
+### Agent Directory Structure
 
-## License
+```
+agent/
+├── agent.py           # Main agent implementation with multi-step pipeline
+├── client.py          # CLI client to interact with the agent
+├── requirements.txt   # Dependencies for the agent
+└── README.md          # Detailed documentation on using the agent
+```
 
-MIT
+### Running the Agent
+
+1. Set up the agent environment:
+
+```bash
+./run.sh agent
+```
+
+2. Run the agent in step-by-step interactive mode:
+
+```bash
+./run.sh agent-run step
+```
+
+3. Run the agent in full pipeline mode:
+
+```bash
+./run.sh agent-run full
+```
+
+4. Run a specific step directly:
+
+```bash
+./run.sh agent-run step data_collection
+```
+
+5. Run everything at once (frontend, backend, and agent setup):
+
+```bash
+./run.sh full
+```
+
+### Integrating Your Own Agent
+
+To integrate your own agent implementation:
+
+1. Review the `agent.py` file to understand the communication pattern
+2. Implement API calls to register your pipeline and update step statuses
+3. Refer to `INTEGRATION_GUIDE.md` in the agent directory for detailed instructions

@@ -1,0 +1,12 @@
+{
+  "steps": [
+    "data_analysis",
+    "evaluation_generation",
+    "create_contribution_goal",
+    "create_development_item",
+    "update_contribution_goal",
+    "update_development_item",
+    "timely_feedback",
+    "coaching"
+  ]
+}

@@ -1,343 +1,297 @@
 #!/bin/bash
 
-# Colors for terminal output
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-RED='\033[0;31m'
-YELLOW='\033[0;33m'
-NC='\033[0m' # No Color
-
-# Project directories
-BASE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-BACKEND_DIR="${BASE_DIR}/backend"
-FRONTEND_DIR="${BASE_DIR}/frontend"
-
-# Function to check if command exists
-command_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
-
-# Function to kill processes using specific ports
-kill_port_processes() {
-  local port=$1
-  echo -e "${YELLOW}Checking for processes using port ${port}...${NC}"
+# Function to kill processes on specific ports
+kill_port() {
+  PORT=$1
+  echo "Checking for process on port $PORT..."
   
-  if command_exists lsof; then
-    # Find PIDs of processes using the specified port
-    local pids=$(lsof -ti :${port} 2>/dev/null)
-    if [ -n "$pids" ]; then
-      echo -e "${YELLOW}Found processes using port ${port}. Killing them...${NC}"
-      # Kill the processes
-      echo "$pids" | xargs kill -9 2>/dev/null
-      sleep 1
-      echo -e "${GREEN}Port ${port} cleared.${NC}"
+  # For macOS (lsof)
+  if command -v lsof &> /dev/null; then
+    PID=$(lsof -i :$PORT -t 2>/dev/null)
+    if [ -n "$PID" ]; then
+      echo "Killing process $PID on port $PORT"
+      kill -9 $PID 2>/dev/null || true
+      sleep 1  # Give the OS time to release the port
+      # Double-check port is actually free
+      REMAINING=$(lsof -i :$PORT -t 2>/dev/null)
+      if [ -n "$REMAINING" ]; then
+        echo "Warning: Port $PORT still has active processes. Trying again..."
+        kill -9 $REMAINING 2>/dev/null || true
+      fi
     else
-      echo -e "${GREEN}No processes found using port ${port}.${NC}"
+      echo "No process found running on port $PORT"
+    fi
+  # For Linux (netstat)
+  elif command -v netstat &> /dev/null; then
+    PID=$(netstat -nlp 2>/dev/null | grep ":$PORT" | awk '{print $7}' | cut -d'/' -f1)
+    if [ -n "$PID" ]; then
+      echo "Killing process $PID on port $PORT"
+      kill -9 $PID 2>/dev/null || true
+    else
+      echo "No process found running on port $PORT"
     fi
   else
-    echo -e "${RED}lsof command not found. Unable to check for port usage.${NC}"
+    echo "Neither lsof nor netstat found. Cannot check for processes on ports."
   fi
 }
 
-# Check for required dependencies
-check_dependencies() {
-  echo -e "${BLUE}Checking dependencies...${NC}"
+# Function to kill port processes if needed
+kill_ports() {
+  echo -e "${YELLOW}Ensuring ports 3000 and 4000 are available...${NC}"
+  kill_port 3000
+  kill_port 4000
   
-  # Check for Python
-  if ! command_exists python3; then
-    echo -e "${RED}Python 3 is not installed. Please install it and try again.${NC}"
-    exit 1
+  # Double-check ports are actually free
+  sleep 1
+  echo -e "${GREEN}Ports are now available for use.${NC}"
+}
+
+# Build script - Configure terminal colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Header
+echo -e "${BLUE}=========================================${NC}"
+echo -e "${GREEN}   Agent Pipeline Visualizer Script     ${NC}"
+echo -e "${BLUE}=========================================${NC}"
+
+# Directory Paths
+FRONTEND_DIR="$(pwd)/frontend"
+BACKEND_DIR="$(pwd)/backend"
+AGENT_DIR="$(pwd)/agent"
+
+# Function to run frontend
+run_frontend() {
+  local websocket_mode=${1:-"no"}
+  
+  echo -e "${YELLOW}Starting Next.js frontend...${NC}"
+  cd "$FRONTEND_DIR"
+  
+  # Install socket.io-client if in websocket mode
+  if [ "$websocket_mode" == "websocket" ]; then
+    # Check if socket.io-client is already installed
+    if ! grep -q '"socket.io-client"' package.json; then
+      echo -e "${YELLOW}Installing socket.io-client...${NC}"
+      npm install --silent socket.io-client
+      echo -e "${GREEN}WebSocket client dependencies installed${NC}"
+    else
+      echo -e "${GREEN}socket.io-client already installed${NC}"
+    fi
   fi
   
-  # Check for Node.js
-  if ! command_exists node; then
-    echo -e "${RED}Node.js is not installed. Please install it and try again.${NC}"
-    exit 1
-  fi
-  
-  # Check for npm
-  if ! command_exists npm; then
-    echo -e "${RED}npm is not installed. Please install it and try again.${NC}"
-    exit 1
-  fi
-  
-  echo -e "${GREEN}All dependencies are installed!${NC}"
-}
-
-# Setup Python virtual environment and install dependencies
-setup_backend() {
-  echo -e "${BLUE}Setting up backend...${NC}"
-  cd "$BACKEND_DIR" || exit 1
-  
-  # Create virtual environment if it doesn't exist
-  if [ ! -d "venv" ]; then
-    echo -e "${YELLOW}Creating virtual environment...${NC}"
-    python3 -m venv venv
-  fi
-  
-  # Activate virtual environment and install dependencies
-  echo -e "${YELLOW}Installing backend dependencies...${NC}"
-  source venv/bin/activate
-  pip install -r requirements.txt
-  
-  cd ..
-  echo -e "${GREEN}Backend setup complete!${NC}"
-}
-
-# Install npm dependencies for the frontend
-setup_frontend() {
-  echo -e "${BLUE}Setting up frontend...${NC}"
-  cd "$FRONTEND_DIR" || exit 1
-  
-  echo -e "${YELLOW}Installing frontend dependencies...${NC}"
-  npm install
-  
-  cd ..
-  echo -e "${GREEN}Frontend setup complete!${NC}"
-}
-
-# Build the frontend
-build_frontend() {
-  echo -e "${BLUE}Building frontend...${NC}"
-  cd "$FRONTEND_DIR" || exit 1
-  
-  npm run build
-  
-  cd ..
-  echo -e "${GREEN}Frontend build complete!${NC}"
-}
-
-# Start the backend server
-start_backend() {
-  echo -e "${BLUE}Starting backend server...${NC}"
-  
-  # Kill any processes using our port
-  kill_port_processes 4000
-  
-  cd "$BACKEND_DIR" || exit 1
-  
-  # Activate virtual environment
-  source venv/bin/activate
-  
-  # Run in background and save PID
-  python3 app.py &
-  echo $! > ./backend.pid
-  
-  cd ..
-  echo -e "${GREEN}Backend server started on http://localhost:4000${NC}"
-}
-
-# Start the frontend server
-start_frontend() {
-  echo -e "${BLUE}Starting frontend server...${NC}"
-  
-  # Kill any processes using our port
-  kill_port_processes 3000
-  
-  cd "$FRONTEND_DIR" || exit 1
-  
-  # Run in background and save PID
-  npm run start &
-  echo $! > ./frontend.pid
-  
-  cd ..
-  echo -e "${GREEN}Frontend server started on http://localhost:3000${NC}"
-}
-
-# Start both servers in development mode
-start_dev() {
-  echo -e "${BLUE}Starting development servers...${NC}"
-  
-  # Kill any processes using our ports
-  kill_port_processes 4000
-  kill_port_processes 3000
-  
-  cd "$BACKEND_DIR" || exit 1
-  
-  # Activate virtual environment and start Flask in dev mode
-  source venv/bin/activate
-  echo -e "${YELLOW}Starting Flask development server...${NC}"
-  python3 app.py &
-  BACKEND_PID=$!
-  echo $BACKEND_PID > ./backend.pid
-  
-  cd ..
-  
-  cd "$FRONTEND_DIR" || exit 1
-  echo -e "${YELLOW}Starting Next.js development server...${NC}"
   npm run dev &
   FRONTEND_PID=$!
-  echo $FRONTEND_PID > ./frontend.pid
+  echo -e "${GREEN}Frontend started at http://localhost:3000${NC}"
+}
+
+# Function to run backend
+run_backend() {
+  local websocket_mode=${1:-"no"}
   
-  cd ..
+  echo -e "${YELLOW}Starting Flask backend...${NC}"
+  cd "$BACKEND_DIR"
+  source venv/bin/activate
   
-  echo -e "${GREEN}Development servers started:${NC}"
-  echo -e "${GREEN}Backend: http://localhost:4000${NC}"
-  echo -e "${GREEN}Frontend: http://localhost:3000${NC}"
-  echo -e "${YELLOW}Press Ctrl+C to stop both servers.${NC}"
+  # Install WebSocket dependencies if in websocket mode
+  if [ "$websocket_mode" == "websocket" ]; then
+    echo -e "${YELLOW}Installing WebSocket dependencies...${NC}"
+    pip install flask-socketio python-socketio python-engineio
+    echo -e "${GREEN}WebSocket dependencies installed${NC}"
+  fi
   
-  # Wait for user to press Ctrl+C and then cleanup
-  trap cleanup INT
+  # Use -u for unbuffered output to prevent issues with SIGINT handling
+  PYTHONUNBUFFERED=1 exec python app.py &
+  BACKEND_PID=$!
   
-  # Monitor both processes and kill the other if one dies
-  while true; do
-    if ! ps -p "$BACKEND_PID" > /dev/null; then
-      echo -e "${RED}Backend server crashed or stopped unexpectedly. Stopping all servers.${NC}"
-      # Kill frontend process
-      if ps -p "$FRONTEND_PID" > /dev/null; then
-        kill "$FRONTEND_PID"
-      fi
-      # Clean up pid files
-      [ -f "$BACKEND_DIR/backend.pid" ] && rm "$BACKEND_DIR/backend.pid"
-      [ -f "$FRONTEND_DIR/frontend.pid" ] && rm "$FRONTEND_DIR/frontend.pid"
-      echo -e "${RED}All servers have been stopped due to backend failure.${NC}"
-      return 1
-    fi
-    
-    if ! ps -p "$FRONTEND_PID" > /dev/null; then
-      echo -e "${RED}Frontend server crashed or stopped unexpectedly. Stopping all servers.${NC}"
-      # Kill backend process
-      if ps -p "$BACKEND_PID" > /dev/null; then
-        kill "$BACKEND_PID"
-      fi
-      # Clean up pid files
-      [ -f "$BACKEND_DIR/backend.pid" ] && rm "$BACKEND_DIR/backend.pid"
-      [ -f "$FRONTEND_DIR/frontend.pid" ] && rm "$FRONTEND_DIR/frontend.pid"
-      echo -e "${RED}All servers have been stopped due to frontend failure.${NC}"
-      return 1
-    fi
-    
-    # Check every 2 seconds
+  if [ "$websocket_mode" == "websocket" ]; then
+    echo -e "${GREEN}Backend started with WebSocket support at http://localhost:4000${NC}"
+  else
+    echo -e "${GREEN}Backend started at http://localhost:4000${NC}"
+  fi
+}
+
+# Function to setup agent environment
+setup_agent() {
+  echo -e "${YELLOW}Setting up agent environment...${NC}"
+  
+  # Check if agent virtual environment exists
+  if [ ! -d "$AGENT_DIR/venv" ]; then
+    echo -e "${BLUE}Creating virtual environment for agent...${NC}"
+    cd "$AGENT_DIR"
+    python -m venv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
+    deactivate
+  fi
+  
+  echo -e "${GREEN}Agent environment ready.${NC}"
+}
+
+# Function to run agent
+run_agent() {
+  local mode=$1
+  local step=$2
+  local api_url="http://localhost:4000"
+  
+  setup_agent
+  
+  # Check if the backend is running
+  echo -e "${YELLOW}Checking if backend API is available...${NC}"
+  if ! curl -s "$api_url/api/status" > /dev/null; then
+    echo -e "${RED}Warning: Backend API is not accessible at $api_url${NC}"
+    echo -e "${YELLOW}The agent will run in offline mode and won't connect to the visualizer.${NC}"
+    echo -e "${BLUE}Consider running './run.sh dev' in another terminal first.${NC}"
     sleep 2
-  done
-}
-
-# Stop all running servers
-stop_servers() {
-  echo -e "${BLUE}Stopping servers...${NC}"
-  
-  # Stop backend if running
-  if [ -f "$BACKEND_DIR/backend.pid" ]; then
-    BACKEND_PID=$(cat "$BACKEND_DIR/backend.pid")
-    if ps -p "$BACKEND_PID" > /dev/null; then
-      echo -e "${YELLOW}Stopping backend server (PID: $BACKEND_PID)...${NC}"
-      kill -9 "$BACKEND_PID" 2>/dev/null
-      rm "$BACKEND_DIR/backend.pid"
-    else
-      echo -e "${YELLOW}Backend server process not found, cleaning up pid file.${NC}"
-      rm "$BACKEND_DIR/backend.pid"
-    fi
+  else
+    echo -e "${GREEN}Backend API is available. Agent will connect to the visualizer.${NC}"
   fi
   
-  # Stop frontend if running
-  if [ -f "$FRONTEND_DIR/frontend.pid" ]; then
-    FRONTEND_PID=$(cat "$FRONTEND_DIR/frontend.pid")
-    if ps -p "$FRONTEND_PID" > /dev/null; then
-      echo -e "${YELLOW}Stopping frontend server (PID: $FRONTEND_PID)...${NC}"
-      kill -9 "$FRONTEND_PID" 2>/dev/null
-      rm "$FRONTEND_DIR/frontend.pid"
-    else
-      echo -e "${YELLOW}Frontend server process not found, cleaning up pid file.${NC}"
-      rm "$FRONTEND_DIR/frontend.pid"
-    fi
+  echo -e "${YELLOW}Running agent in $mode mode...${NC}"
+  cd "$AGENT_DIR"
+  source venv/bin/activate
+  
+  if [ "$mode" == "step" ] && [ -n "$step" ]; then
+    python client.py --mode step --step "$step" --api-url "$api_url"
+  elif [ "$mode" == "step" ]; then
+    python client.py --mode step --api-url "$api_url"
+  else
+    python client.py --mode full --api-url "$api_url"
   fi
-  
-  # Also kill any processes on our ports to be sure
-  kill_port_processes 4000
-  kill_port_processes 3000
-  
-  echo -e "${GREEN}All servers have been stopped.${NC}"
 }
 
-# Cleanup function to stop servers when script is interrupted
-cleanup() {
-  echo -e "\n${BLUE}Catching interrupt signal. Cleaning up...${NC}"
-  stop_servers
-  
-  # Also kill any remaining processes on our ports
-  kill_port_processes 4000
-  kill_port_processes 3000
-  
-  exit 0
+# Function to build frontend
+build_frontend() {
+  echo -e "${YELLOW}Building Next.js frontend...${NC}"
+  cd "$FRONTEND_DIR"
+  npm run build
+  echo -e "${GREEN}Frontend build completed${NC}"
 }
 
-# Function to handle server crashes
-handle_crash() {
-  echo -e "\n${RED}A server has crashed. Cleaning up...${NC}"
-  stop_servers
+# Check for the command argument
+if [ "$1" == "dev" ]; then
+  # Development mode - run both servers with WebSocket support by default
+  kill_ports
+  run_frontend "websocket"
+  run_backend "websocket"
+  
+  echo -e "${GREEN}Both servers are running with WebSocket support. Press Ctrl+C to stop both.${NC}"
+  echo -e "${BLUE}Access the agent dashboard at http://localhost:3000/agent${NC}"
+  echo -e "${GREEN}WebSocket enabled: No UI flickering during step execution${NC}"
+  echo -e "${YELLOW}To run the agent demo in another terminal:${NC}"
+  echo -e "  ${YELLOW}./run.sh agent-run step${NC}"
+  
+  # Trap to catch Ctrl+C and kill both processes
+  trap 'echo -e "${YELLOW}Gracefully shutting down servers...${NC}"; kill -TERM $FRONTEND_PID $BACKEND_PID 2>/dev/null; sleep 1; if ps -p $BACKEND_PID > /dev/null; then kill -9 $BACKEND_PID 2>/dev/null; fi; echo -e "${RED}Servers stopped.${NC}"; exit 0' INT TERM
+  # Wait for both processes to finish
+  wait
+  
+elif [ "$1" == "build" ]; then
+  # Build mode - build frontend
+  build_frontend
+  
+elif [ "$1" == "agent" ]; then
+  # Setup agent environment
+  setup_agent
+  
+  echo -e "${BLUE}To run the agent in step-by-step mode:${NC}"
+  echo -e "${YELLOW}./run.sh agent-run step${NC}"
+  echo -e "${BLUE}To run the full agent pipeline:${NC}"
+  echo -e "${YELLOW}./run.sh agent-run full${NC}"
+  
+elif [ "$1" == "agent-run" ]; then
+  # Run agent with specified mode
+  mode=${2:-"step"}  # Default to step mode if not specified
+  step=$3
+  
+  # Make sure backend port is free when connecting to it
+  kill_port 4000
+  
+  run_agent "$mode" "$step"
+  
+elif [ "$1" == "full" ]; then
+  # Run everything - frontend, backend, and agent
+  kill_ports
+  run_frontend
+  run_backend
+  
+  echo -e "${GREEN}Servers are running. Setting up agent...${NC}"
+  setup_agent
+  
+  echo -e "${BLUE}==================================${NC}"
+  echo -e "${GREEN}All components are ready!${NC}"
+  echo -e "${BLUE}==================================${NC}"
+  echo -e "Frontend: ${GREEN}http://localhost:3000${NC}"
+  echo -e "Backend API: ${GREEN}http://localhost:4000${NC}"
+  echo -e "Agent Dashboard: ${GREEN}http://localhost:3000/agent${NC}"
+  echo -e "${BLUE}==================================${NC}"
+  echo -e "${YELLOW}To run the agent:${NC}"
+  echo -e "  ${YELLOW}./run.sh agent-run step${NC} (in a new terminal)"
+  
+  # Trap to catch Ctrl+C and kill both processes
+  trap 'echo -e "${YELLOW}Gracefully shutting down servers...${NC}"; kill -TERM $FRONTEND_PID $BACKEND_PID 2>/dev/null; sleep 1; if ps -p $BACKEND_PID > /dev/null; then kill -9 $BACKEND_PID 2>/dev/null; fi; echo -e "${RED}Servers stopped.${NC}"; exit 0' INT TERM
+  # Wait for both processes to finish
+  wait
+  
+# websocket command now redirects to dev since dev has WebSocket support by default
+elif [ "$1" == "websocket" ]; then
+  echo -e "${YELLOW}Note: The 'websocket' command is now deprecated, as WebSocket support is enabled by default in 'dev' mode.${NC}"
+  echo -e "${GREEN}Running 'dev' mode with WebSocket support...${NC}"
+  
+  # Just call the dev command logic
+  kill_ports
+  run_frontend "websocket"
+  run_backend "websocket"
+  
+  echo -e "${GREEN}Servers are running with WebSocket support. Press Ctrl+C to stop both.${NC}"
+  echo -e "${BLUE}Access the agent dashboard at http://localhost:3000/agent${NC}"
+  echo -e "${YELLOW}To run the agent demo in another terminal:${NC}"
+  echo -e "  ${YELLOW}./run.sh agent-run step${NC}"
+  
+  # Trap to catch Ctrl+C and kill both processes
+  trap 'echo -e "${YELLOW}Gracefully shutting down servers...${NC}"; kill -TERM $FRONTEND_PID $BACKEND_PID 2>/dev/null; sleep 1; if ps -p $BACKEND_PID > /dev/null; then kill -9 $BACKEND_PID 2>/dev/null; fi; echo -e "${RED}Servers stopped.${NC}"; exit 0' INT TERM
+  # Wait for both processes to finish
+  wait
+
+elif [ "$1" == "kill" ]; then
+  # Just kill processes on ports 3000 and 4000
+  echo -e "${BLUE}=========================================${NC}"
+  echo -e "${YELLOW}Killing processes on ports 3000 and 4000...${NC}"
+  echo -e "${BLUE}=========================================${NC}"
+  kill_ports
+  echo -e "${GREEN}Done!${NC}"
+
+elif [ "$1" == "help" ] || [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
+  # Show help information
+  echo -e "${BLUE}=========================================${NC}"
+  echo -e "${GREEN}       Agent Pipeline Visualizer        ${NC}"
+  echo -e "${BLUE}=========================================${NC}"
+  echo -e "${YELLOW}Available commands:${NC}\n"
+  
+  echo -e "${GREEN}Server Management:${NC}"
+  echo -e "  ${YELLOW}./run.sh dev${NC}         - Run frontend and backend in development mode with WebSocket support"
+  echo -e "  ${YELLOW}./run.sh websocket${NC}   - (Deprecated, same as 'dev') Run with WebSocket support"
+  echo -e "  ${YELLOW}./run.sh full${NC}        - Run frontend, backend and setup agent"
+  echo -e "  ${YELLOW}./run.sh build${NC}       - Build the frontend for production"
+  echo -e "  ${YELLOW}./run.sh kill${NC}        - Kill any processes running on ports 3000 and 4000"
+  
+  echo -e "\n${GREEN}Agent Commands:${NC}"
+  echo -e "  ${YELLOW}./run.sh agent${NC}       - Setup the agent environment"
+  echo -e "  ${YELLOW}./run.sh agent-run${NC}   - Run agent in interactive step-by-step mode"
+  echo -e "  ${YELLOW}./run.sh agent-run full${NC} - Run the complete agent pipeline"
+  echo -e "  ${YELLOW}./run.sh agent-run step data_collection${NC} - Run a specific agent step"
+  
+  echo -e "\n${GREEN}Example Workflow:${NC}"
+  echo -e "  1. Start the servers:    ${YELLOW}./run.sh dev${NC}"
+  echo -e "  2. Open in browser:      ${BLUE}http://localhost:3000/agent${NC}"
+  echo -e "  3. In a new terminal:    ${YELLOW}./run.sh agent-run step${NC}"
+  
+  echo -e "\n${BLUE}For more details, see the README.md and agent/README.md files${NC}"
+else
+  # Show usage if no valid argument is provided
+  echo -e "${RED}Unknown command: $1${NC}"
+  echo -e "Run ${YELLOW}./run.sh help${NC} for usage information"
   exit 1
-}
-
-# Display help
-show_help() {
-  echo -e "${BLUE}Flask + Next.js Web Application Build/Run Script${NC}"
-  echo -e "Usage: $0 [command]"
-  echo -e ""
-  echo -e "Commands:"
-  echo -e "  setup       Setup both backend and frontend"
-  echo -e "  build       Build the frontend for production"
-  echo -e "  start       Start both servers in production mode"
-  echo -e "  dev         Start both servers in development mode"
-  echo -e "  stop        Stop all running servers"
-  echo -e "  check_ports Check and clear ports 3000 and 4000 if they are in use"
-  echo -e "  help        Show this help message"
-}
-
-# Main execution based on argument
-case "$1" in
-  setup)
-    check_dependencies
-    setup_backend
-    setup_frontend
-    ;;
-  build)
-    build_frontend
-    ;;
-  start)
-    start_backend
-    start_frontend
-    echo -e "${YELLOW}Press Ctrl+C to stop both servers.${NC}"
-    trap cleanup INT
-    
-    # Get PIDs from files
-    BACKEND_PID=""
-    FRONTEND_PID=""
-    [ -f "$BACKEND_DIR/backend.pid" ] && BACKEND_PID=$(cat "$BACKEND_DIR/backend.pid")
-    [ -f "$FRONTEND_DIR/frontend.pid" ] && FRONTEND_PID=$(cat "$FRONTEND_DIR/frontend.pid")
-    
-    # Monitor both processes in production mode too
-    while true; do
-      if [ -n "$BACKEND_PID" ] && ! ps -p "$BACKEND_PID" > /dev/null; then
-        echo -e "${RED}Backend server crashed or stopped unexpectedly. Stopping all servers.${NC}"
-        # Stop remaining servers
-        stop_servers
-        exit 1
-      fi
-      
-      if [ -n "$FRONTEND_PID" ] && ! ps -p "$FRONTEND_PID" > /dev/null; then
-        echo -e "${RED}Frontend server crashed or stopped unexpectedly. Stopping all servers.${NC}"
-        # Stop remaining servers
-        stop_servers
-        exit 1
-      fi
-      
-      # Check every 2 seconds
-      sleep 2
-    done
-    ;;
-  dev)
-    start_dev
-    ;;
-  stop)
-    stop_servers
-    ;;
-  check_ports)
-    echo -e "${BLUE}Checking port availability...${NC}"
-    kill_port_processes 4000
-    kill_port_processes 3000
-    echo -e "${GREEN}Ports checked and cleared if necessary.${NC}"
-    ;;
-  help|*)
-    show_help
-    ;;
-esac
+fi
