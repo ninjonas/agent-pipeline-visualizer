@@ -25,6 +25,7 @@ export default function AgentStepExecution({
   const [pipelineId, setPipelineId] = useState<string>(
     selectedPipelineId || ""
   );
+  const [pipelineName, setPipelineName] = useState<string>("WebUI");
   const [step, setStep] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [result, setResult] = useState<any>(null);
@@ -387,7 +388,7 @@ export default function AgentStepExecution({
 
     try {
       const response = await api.agent.registerPipeline(
-        "WebUI",
+        pipelineName,
         availableSteps.length
       );
       const newPipelineId = response.pipeline_id;
@@ -397,7 +398,7 @@ export default function AgentStepExecution({
       stepManager.setPipelineId(newPipelineId);
       
       setResult({
-        message: `New pipeline registered with ID: ${newPipelineId}`,
+        message: `New pipeline '${pipelineName}' registered with ID: ${newPipelineId}`,
         ...response,
       });
 
@@ -409,6 +410,9 @@ export default function AgentStepExecution({
       if (onStepExecuted) {
         onStepExecuted(response);
       }
+      
+      // Reset pipeline name to default for next creation
+      setPipelineName("WebUI");
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to register pipeline"
@@ -437,6 +441,7 @@ export default function AgentStepExecution({
             onClick={registerNewPipeline}
             disabled={loading}
             className="text-sm bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:bg-gray-400"
+            title={`Register new pipeline with name: ${pipelineName}`}
           >
             Register New Pipeline
           </button>
@@ -457,6 +462,27 @@ export default function AgentStepExecution({
           className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-800"
           disabled={loading}
         />
+      </div>
+
+      <div className="mb-6">
+        <label
+          htmlFor="pipelineName"
+          className="block text-sm font-medium mb-2 text-gray-700"
+        >
+          Pipeline Name
+        </label>
+        <input
+          id="pipelineName"
+          type="text"
+          value={pipelineName}
+          onChange={(e) => setPipelineName(e.target.value)}
+          placeholder="Enter pipeline name"
+          className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-800"
+          disabled={loading}
+        />
+        <p className="mt-1 text-xs text-gray-500">
+          This name will be used when registering a new pipeline.
+        </p>
       </div>
 
       <form onSubmit={executeStep}>
