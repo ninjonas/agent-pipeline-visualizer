@@ -7,36 +7,39 @@ import random
 import sys
 import time
 import importlib
+import importlib.util
 import uuid
-from typing import Dict, List, Any, Optional
+import logging
+from typing import Dict, Any, Optional, Type, cast
+from abc import ABC, abstractmethod
 
-# Ensure 'agent' is in the module search path
+# Get paths for imports
 agent_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(agent_dir)
 
-# Clean up path to remove any duplicates
-for path_entry in [agent_dir, parent_dir]:
-    while path_entry in sys.path:
-        sys.path.remove(path_entry)
-        
-# Add paths in the correct order
-sys.path.insert(0, parent_dir)  # Add parent directory first
-sys.path.insert(0, agent_dir)   # Add agent directory with highest priority
+# Add parent directory to path
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
-# Setup logging with environment variable control
-import logging
+# Import PipelineStep using importlib to avoid package import issues
+step_interface_path = os.path.join(agent_dir, "steps", "step_interface.py")
+spec = importlib.util.spec_from_file_location("step_interface", step_interface_path)
+step_interface = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(step_interface)
+PipelineStep = step_interface.PipelineStep
+create_result = step_interface.create_result
 
 # Determine log level from environment variable
-log_level_name = os.environ.get('AGENT_LOG_LEVEL', 'WARNING').upper()
+log_level_name = os.environ.get("AGENT_LOG_LEVEL", "WARNING").upper()
 log_level = getattr(logging, log_level_name, logging.WARNING)
 
 # Check if we're in API mode (suppress most logging)
-if os.environ.get('AGENT_API_MODE') == '1':
+if os.environ.get("AGENT_API_MODE") == "1":
     log_level = logging.ERROR  # Only show errors in API mode
 
 logger = logging.getLogger("agent")
 handler = logging.StreamHandler(sys.stderr)  # Send logs to stderr
-handler.setFormatter(logging.Formatter('%(name)s - %(levelname)s - %(message)s'))
+handler.setFormatter(logging.Formatter("%(name)s - %(levelname)s - %(message)s"))
 logger.addHandler(handler)
 logger.setLevel(log_level)
 
@@ -63,7 +66,7 @@ class PipelineAgent:
         
         # Load steps from configuration file
         config_path = os.path.join(os.path.dirname(__file__), "steps_config.json")
-        with open(config_path, "r") as config_file:
+        with open(config_path, "r", encoding="utf-8") as config_file:
             config = json.load(config_file)
             self.steps = config.get("steps", [])
         
@@ -74,124 +77,153 @@ class PipelineAgent:
     def register_pipeline(self) -> str:
         """Register a new pipeline (simulated)"""
         # We're being called with an existing pipeline ID
-        if hasattr(sys, 'pipeline_id'):
-            self.pipeline_id = getattr(sys, 'pipeline_id')
-            logger.info(f"Using existing pipeline ID: {self.pipeline_id}")
+        if hasattr(sys, "pipeline_id"):
+            self.pipeline_id = getattr(sys, "pipeline_id")
+            logger.info("Using existing pipeline ID: %s", self.pipeline_id)
         else:
             # Generate a pipeline ID
             self.pipeline_id = str(uuid.uuid4())
-            logger.info(f"Pipeline registered with ID: {self.pipeline_id}")
+            logger.info("Pipeline registered with ID: %s", self.pipeline_id)
         
         return self.pipeline_id
     
-    def update_step_status(self, step: str, status: str, message: str = "", data: Any = None) -> bool:
+    def update_step_status(self, step_name: str, status: str, message: str = "", data: Any = None) -> bool:
         """Update the status of a step (simulated)"""
         if not self.pipeline_id:
             logger.error("No pipeline ID. Register pipeline first.")
             return False
         
         # Update local state only
-        self.step_status[step] = status
+        self.step_status[step_name] = status
         if data:
             if "results" not in self.results:
                 self.results["results"] = {}
-            self.results["results"][step] = data
+            self.results["results"][step_name] = data
         
-        logger.info(f"Step '{step}' updated: {status}")
+        logger.info("Step '%s' updated: %s", step_name, status)
         return True
     
-    def execute_step(self, step: str) -> Dict[str, Any]:
+    def execute_step(self, step_name: str) -> Dict[str, Any]:
         """Execute a specific pipeline step"""
-        if step not in self.steps:
-            return {"status": "error", "message": f"Unknown step: {step}"}
+        if step_name not in self.steps:
+            return {"status": "error", "message": f"Unknown step: {step_name}"}
         
-        if self.step_status[step] == "completed":
-            return {"status": "skipped", "message": f"Step '{step}' already completed"}
+        if self.step_status[step_name] == "completed":
+            return {"status": "skipped", "message": f"Step '{step_name}' already completed"}
         
-        self.current_step = step
-        self.update_step_status(step, "running", f"Starting {step}...")
+        self.current_step = step_name
+        self.update_step_status(step_name, "running", f"Starting {step_name}...")
         
         # Simulate processing time
         processing_time = random.uniform(1.5, 4.0)
         time.sleep(processing_time)
         
         # Try to use actual step implementations if available, otherwise simulate
-        result = self._process_step(step)
+        step_result = self._process_step(step_name)
         
         # Update step status based on result
-        if result["status"] == "success":
+        if step_result["status"] == "success":
             self.update_step_status(
-                step, 
+                step_name, 
                 "completed", 
-                f"Completed {step} in {processing_time:.2f}s",
-                result["data"]
+                f"Completed {step_name} in {processing_time:.2f}s",
+                step_result["data"]
             )
         else:
             self.update_step_status(
-                step, 
+                step_name, 
                 "failed", 
-                result["message"]
+                step_result["message"]
             )
             
         self.current_step = None
-        return result
+        return step_result
     
-    def _process_step(self, step: str) -> Dict[str, Any]:
+    def _process_step(self, step_name: str) -> Dict[str, Any]:
         """Perform the actual processing for a step by dynamically loading its module."""
         try:
             # Use a relative import path based on the current file location
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            step_dir = os.path.join(current_dir, "steps", step)
+            step_dir = os.path.join(current_dir, "steps", step_name)
             # Add step directory to path temporarily
             sys.path.insert(0, step_dir)
             
             # First try the direct import approach
             try:
-                step_module_path = f"step"
-                logger.info(f"Attempting to import module: {step_module_path} from {step_dir}")
-                step_module = importlib.import_module(step_module_path)
+                step_module_path = "step"
+                logger.info("Attempting to import module: %s from %s", step_module_path, step_dir)
+                
+                # Use importlib to load the module directly from file
+                step_file_path = os.path.join(step_dir, "step.py")
+                if os.path.exists(step_file_path):
+                    spec = importlib.util.spec_from_file_location(step_module_path, step_file_path)
+                    step_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(step_module)
+                else:
+                    # Fall back to standard import
+                    step_module = importlib.import_module(step_module_path)
             except ImportError as e:
                 # If that fails, try as a package
-                step_module_path = f"agent.steps.{step}.step"
-                logger.info(f"First approach failed ({e}), trying: {step_module_path}")
+                step_module_path = f"agent.steps.{step_name}.step"
+                logger.info("First approach failed (%s), trying: %s", e, step_module_path)
                 step_module = importlib.import_module(step_module_path)
             finally:
                 # Clean up sys.path no matter what
                 if step_dir in sys.path:
                     sys.path.remove(step_dir)
-                
+            
+            # Try to create a PipelineStep instance if the module has a Step class
+            if hasattr(step_module, "Step"):
+                try:
+                    # Instantiate the Step class and call its execute method
+                    step_instance = step_module.Step()
+                    
+                    # Check if the instance implements the interface by checking for the execute method
+                    if hasattr(step_instance, 'execute') and callable(step_instance.execute):
+                        step_execute_result = step_instance.execute()
+                        # Ensure data field exists
+                        if not step_execute_result.get("data"):
+                            step_execute_result["data"] = {}
+                        logger.debug("Step %s result from Step instance: %s", step_name, json.dumps(step_execute_result))
+                        return step_execute_result
+                    else:
+                        logger.warning("Step %s has a Step class but it doesn't implement expected interface", step_name)
+                except Exception as ex:
+                    logger.error("Error instantiating Step class: %s", ex)
+            
+            # Fall back to the old function-based approach
             if hasattr(step_module, "execute"):
-                result = step_module.execute()
+                step_result = step_module.execute()
                 # Ensure the result is properly formatted
-                if not isinstance(result, dict):
-                    logger.warning(f"Step {step} returned non-dict result. Converting to standard format.")
+                if not isinstance(step_result, dict):
+                    logger.warning("Step %s returned non-dict result. Converting to standard format.", step_name)
                     return {
                         "status": "success",
-                        "message": f"Execution of {step} completed",
-                        "data": {"raw_result": str(result)}
+                        "message": f"Execution of {step_name} completed",
+                        "data": {"raw_result": str(step_result)}
                     }
                 
                 # Ensure required fields exist
-                if "status" not in result:
-                    result["status"] = "success"
-                if "message" not in result:
-                    result["message"] = f"Execution of {step} completed"
-                if "data" not in result:
-                    result["data"] = {}
+                if "status" not in step_result:
+                    step_result["status"] = "success"
+                if "message" not in step_result:
+                    step_result["message"] = f"Execution of {step_name} completed"
+                if "data" not in step_result:
+                    step_result["data"] = {}
                     
                 # Log the result for debugging
-                logger.debug(f"Step {step} result: {json.dumps(result)}")
-                return result
+                logger.debug("Step %s result: %s", step_name, json.dumps(step_result))
+                return step_result
             else:
-                logger.warning(f"Step module {step_module_path} has no execute() function. Using simulation.")
+                logger.warning("Step module %s has no execute() function or Step class. Using simulation.", step_module_path)
                 # Fallback to simulated execution
-                return self._simulate_step_execution(step)
+                return self._simulate_step_execution(step_name)
         except Exception as e:
-            logger.error(f"Error executing step module: {e}")
+            logger.error("Error executing step module: %s", e)
             # Fallback to simulated execution on error
-            return self._simulate_step_execution(step)
+            return self._simulate_step_execution(step_name)
     
-    def _simulate_step_execution(self, step: str) -> Dict[str, Any]:
+    def _simulate_step_execution(self, step_name: str) -> Dict[str, Any]:
         """Generate a simulated result for a step execution"""
         processing_time = random.uniform(0.5, 1.0)
         
@@ -206,7 +238,7 @@ class PipelineAgent:
         
         return {
             "status": "success",
-            "message": f"Simulated execution of {step} completed",
+            "message": f"Simulated execution of {step_name} completed",
             "data": data
         }
     
@@ -221,18 +253,18 @@ class PipelineAgent:
             "steps": {}
         }
         
-        for step in self.steps:
-            step_result = self.execute_step(step)
-            results["steps"][step] = step_result
+        for step_name in self.steps:
+            step_result = self.execute_step(step_name)
+            results["steps"][step_name] = step_result
             
             # Stop pipeline execution if a step fails
             if step_result["status"] == "error":
                 break
         
         # Determine overall pipeline status
-        if all(self.step_status[step] == "completed" for step in self.steps):
+        if all(self.step_status[step_name] == "completed" for step_name in self.steps):
             results["status"] = "completed"
-        elif any(self.step_status[step] == "failed" for step in self.steps):
+        elif any(self.step_status[step_name] == "failed" for step_name in self.steps):
             results["status"] = "failed"
         else:
             results["status"] = "partial"

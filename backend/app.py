@@ -268,7 +268,7 @@ def execute_agent_step():
                 # Run the agent with output redirected to our file
                 with open(temp_output_path, 'w') as output_file:
                     process = subprocess.run(
-                        [sys.executable, client_file, '--mode', 'step', '--step', step, '--pipeline-id', pipeline_id],
+                        [sys.executable, client_file, '--mode', 'step', '--step', step, '--pipeline-id', pipeline_id, '--api-mode'],
                         cwd=agent_dir,
                         stdout=output_file,
                         stderr=subprocess.PIPE,
@@ -390,8 +390,11 @@ def execute_agent_step():
                 'status': step_result.get('status', 'failed'),
                 'message': step_result.get('message', 'No message provided'),
                 'updated_at': time.time(),
-                'data': step_result.get('data', {})
+                'data': step_result.get('data', {})  # Always provide at least an empty dict
             }
+            
+            # Log the extracted data
+            logger.info(f"Data from step result: {json.dumps(step_result.get('data', {}))}")
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing error: {e}")
             logger.error(f"Raw output: {result.stdout}")

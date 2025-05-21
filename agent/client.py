@@ -6,16 +6,21 @@ Demonstrates how to use the agent in a client application.
 
 import argparse
 import json
-import time
 import os
 import sys
+import importlib.util
+import traceback
 
-# Ensure the parent directory is in the Python path so 'agent' can be imported as a package
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(parent_dir)
+# Add the project root to the Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 
-# Import the PipelineAgent
-from agent import PipelineAgent
+# Import the agent module and PipelineAgent directly
+agent_path = os.path.join(project_root, "agent", "agent.py")
+spec = importlib.util.spec_from_file_location("agent_module", agent_path)
+agent_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(agent_module)
+PipelineAgent = agent_module.PipelineAgent
 
 def main():
     parser = argparse.ArgumentParser(description="Run the pipeline agent")
@@ -25,164 +30,177 @@ def main():
                         help="Specific step to run (only with --mode=step)")
     parser.add_argument("--api-url", type=str, default="http://localhost:4000",
                         help="Backend API URL")
-    parser.add_argument("--pipeline-id", type=str,
-                        help="Use an existing pipeline ID instead of creating a new one")
-    
+    parser.add_argument("--pipeline-id", type=str, default=None,
+                        help="ID of an existing pipeline to update")
+    parser.add_argument("--api-mode", action="store_true",
+                        help="When enabled, output is JSON formatted for API consumption")
     args = parser.parse_args()
     
-    # Ensure API URL has correct format
     api_url = args.api_url
-    if api_url and not api_url.startswith(("http://", "https://")):
-        api_url = f"http://{api_url}"
+    step_name = args.step
+    mode = args.mode
+    api_mode_flag = args.api_mode
     
-    # Initialize the agent
+    # Set pipeline ID if provided
+    if args.pipeline_id:
+        setattr(sys, "pipeline_id", args.pipeline_id)
+    
+    # Create agent instance
     agent = PipelineAgent(api_url=api_url)
     
-    # Use provided pipeline ID or register a new one
-    api_mode = os.environ.get("AGENT_API_MODE") == "1"
+    # Register pipeline
+    pipeline_id = agent.register_pipeline()
     
-    if args.pipeline_id:
-        # Store pipeline_id in the sys module so the fallback agent can access it
-        sys.pipeline_id = args.pipeline_id
-        agent.pipeline_id = args.pipeline_id
-        if not api_mode:
-            print(f"Using existing pipeline ID: {agent.pipeline_id}")
-    else:
-        agent.register_pipeline()
-        if not api_mode:
-            print(f"Initialized agent with pipeline ID: {agent.pipeline_id}")
-    
-    if args.mode == "full":
-        # Execute the entire pipeline
-        print("Executing full pipeline...")
-        results = agent.execute_pipeline()
-        print("\nPipeline execution completed!")
-        print(f"Final status: {results['status']}")
-        print("\nStep details:")
-        
-        for step, details in results["steps"].items():
-            status_emoji = "✅" if details["status"] == "success" else "❌"
-            print(f"{status_emoji} {step}: {details['message']}")
-            
-    elif args.mode == "step":
-        if args.step:
-            # Execute a specific step
-            if args.step in agent.steps:
-                # For API integration, we need clean JSON output
-                # Check if we're being called from the API
-                api_mode = args.pipeline_id or os.environ.get("AGENT_API_MODE") == "1"
-                
-                if api_mode:  # If we're being called from the API
-                    # For API usage, we need a completely clean JSON output with no debugging info
-                    
-                    # Suppress all initialization output by redirecting stdout
-                    original_stdout = sys.stdout
-                    sys.stdout = open(os.devnull, 'w')
-                    
-                    try:
-                        # Use a special function that handles all the redirection and cleanup
-                        output = api_step_execution(agent, args.step)
-                        
-                        # Restore stdout and print ONLY the clean JSON output
-                        sys.stdout = original_stdout
-                        # Print only the JSON, nothing else - this is critical
-                        print(json.dumps(output))
-                    except Exception as e:
-                        # Ensure we restore stdout even if there's an error
-                        sys.stdout = original_stdout
-                        print(json.dumps({
-                            "status": "error",
-                            "message": f"Error: {str(e)}",
-                            "data": {}
-                        }))
-                else:  # Interactive mode with human-readable output
-                    print(f"Executing step: {args.step}")
-                    result = agent.execute_step(args.step)
-                    print(f"Step result: {result['status']}")
-                    print(f"Message: {result.get('message', '')}")
-                    if 'data' in result:
-                        print("Data:")
-                        print(json.dumps(result['data'], indent=2))
-            else:
-                # If step not found and in API mode, ensure clean JSON output
-                if api_mode:
-                    error_output = {
-                        "status": "error",
-                        "message": f"Unknown step: {args.step}. Available steps: {', '.join(agent.steps)}"
-                    }
-                    # Ensure we're only outputting clean JSON for API
-                    print(json.dumps(error_output), flush=True)
-                else:
-                    print(f"Error: Unknown step '{args.step}'")
-                    print(f"Available steps: {', '.join(agent.steps)}")
-        else:
-            # Interactive mode - go through steps one by one
-            print("Step-by-step execution mode. Press Enter to execute each step...")
-            
-            for step in agent.steps:
-                input(f"Press Enter to execute '{step}'...")
-                result = agent.execute_step(step)
-                status_emoji = "✅" if result["status"] == "success" else "❌"
-                print(f"{status_emoji} {step}: {result['message']}")
-                
-                # Display current progress
-                status = agent.get_pipeline_status()
-                completed = sum(1 for s in status["steps"].values() if s == "completed")
-                print(f"Progress: {completed}/{len(agent.steps)} steps completed")
-                print("-" * 40)
-                
-    # Final status - only show this in interactive mode, not API mode
-    api_mode = os.environ.get("AGENT_API_MODE") == "1"
-    if not api_mode:
-        status = agent.get_pipeline_status()
-        print("\nFinal pipeline status:")
-        print(json.dumps(status, indent=2))
-
-def api_step_execution(agent, step):
-    """Execute a step purely for API consumption with clean output"""
+    output = {}
     try:
-        # Clear stdout buffer before we start
-        sys.stdout.flush()
-        
-        result = agent.execute_step(step)
-        output = {
-            "status": result["status"],
-            "message": result.get("message", f"Executed {step}"),
-            "data": result.get("data", {})
-        }
-        return output
+        if mode == "full":
+            # Run all steps
+            if api_mode_flag:
+                # When in API mode, capture stdout and return JSON
+                result = agent.execute_pipeline()
+                output = {
+                    "pipeline_id": pipeline_id,
+                    "status": "success",
+                    "message": "Pipeline execution completed",
+                    "data": result
+                }
+            else:
+                # Human-readable output
+                result = agent.execute_pipeline()
+                print(f"\nPipeline '{pipeline_id}' executed with result: {result['status']}")
+                
+                print("\nStep results:")
+                for step_name, details in result["steps"].items():
+                    status_emoji = "✅" if details["status"] == "success" else "❌"
+                    print(f"{status_emoji} {step_name}: {details['message']}")
+                
+                print("\nFinal pipeline status:")
+                print("✅" if result["status"] == "completed" else "❌", result["status"])
+                
+                output = {
+                    "pipeline_id": pipeline_id,
+                    "status": "success",
+                    "message": "Pipeline execution completed",
+                    "data": result
+                }
+                
+        elif mode == "step":
+            # Run a single step
+            if not step_name:
+                error_output = {
+                    "pipeline_id": pipeline_id,
+                    "status": "error",
+                    "message": "Step parameter is required when mode=step",
+                    "data": {}
+                }
+                if api_mode_flag:
+                    print(json.dumps(error_output))
+                else:
+                    print("Error: Step parameter is required when mode=step")
+                    print(f"Available steps: {', '.join(agent.steps)}")
+                return error_output
+            
+            if step_name not in agent.steps:
+                error_output = {
+                    "pipeline_id": pipeline_id,
+                    "status": "error",
+                    "message": f"Unknown step: {step_name}. Available steps: {', '.join(agent.steps)}",
+                    "data": {}
+                }
+                if api_mode_flag:
+                    print(json.dumps(error_output))
+                else:
+                    print(f"Error: Unknown step: {step_name}")
+                    print(f"Available steps: {', '.join(agent.steps)}")
+                return error_output
+            
+            # Execute the step
+            if api_mode_flag:
+                # When in API mode, capture stdout and return JSON
+                try:
+                    original_stdout = sys.stdout
+                    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+                    result = agent.execute_step(step_name)
+                    # Ensure data is included and not empty
+                    if not result.get("data"):
+                        result["data"] = {}
+                    
+                    output = {
+                        "pipeline_id": pipeline_id,
+                        "status": result["status"],
+                        "message": result["message"],
+                        "data": result["data"]  # Use direct access since we ensure it exists
+                    }
+                finally:
+                    if "original_stdout" in locals():
+                        sys.stdout = original_stdout
+                        print(json.dumps(output))
+            else:
+                # Human-readable output
+                result = agent.execute_step(step_name)
+                # Ensure data is included and not empty
+                if not result.get("data"):
+                    result["data"] = {}
+                    
+                status_emoji = "✅" if result["status"] == "success" else "❌"
+                print(f"{status_emoji} Step '{step_name}' executed with status: {result['status']}")
+                print(f"Message: {result['message']}")
+                
+                # Show result data if present
+                if result["data"]:  # Will be at least an empty dict now
+                    print("\nResult data:")
+                    print(json.dumps(result["data"], indent=2))
+                
+                output = {
+                    "pipeline_id": pipeline_id,
+                    "status": result["status"],
+                    "message": result["message"],
+                    "data": result["data"]  # Use direct access since we ensure it exists
+                }
     except Exception as e:
-        return {
-            "status": "error", 
-            "message": f"Error executing {step}: {str(e)}",
+        error_message = str(e)
+        error_output = {
+            "pipeline_id": pipeline_id,
+            "status": "error",
+            "message": f"Error executing agent: {error_message}",
             "data": {}
         }
+        if api_mode_flag:
+            print(json.dumps(error_output))
+        else:
+            print(f"Error executing agent: {e}")
+            traceback.print_exc()
+        return error_output
+    
+    return output
 
 if __name__ == "__main__":
-    # For API mode, catch all exceptions to ensure clean JSON output
-    if os.environ.get('AGENT_API_MODE') == '1':
-        try:
-            # Temporarily redirect stderr to avoid polluting output
+    try:
+        # Redirect stderr to capture logging output when in API mode
+        api_mode_flag = "--api-mode" in sys.argv
+        
+        if api_mode_flag:
+            # Capture and suppress stderr when in API mode
             stderr_backup = sys.stderr
-            sys.stderr = open(os.devnull, 'w')
-            
-            try:
-                main()
-            finally:
-                # Restore stderr
-                sys.stderr.close()
-                sys.stderr = stderr_backup
-        except Exception as e:
-            # Output any unexpected error as clean JSON
-            error_output = {
-                "status": "error",
-                "message": f"Unexpected error: {str(e)}",
-                "data": {"error_type": type(e).__name__}
-            }
-            # Ensure stdout is clean before printing
-            sys.stdout = sys.__stdout__
-            print(json.dumps(error_output))
-            sys.exit(1)
+            sys.stderr = open(os.devnull, "w", encoding="utf-8")
+        
+        result = main()
+    except Exception as e:
+        if "api_mode_flag" in locals() and api_mode_flag and "stderr_backup" in locals():
+            sys.stderr = stderr_backup
+        print(json.dumps({
+            "status": "error",
+            "message": f"Unhandled error: {str(e)}",
+            "data": {}
+        }))
+        traceback.print_exc()
+        sys.exit(1)
+    finally:
+        if "api_mode_flag" in locals() and api_mode_flag and "stderr_backup" in locals():
+            sys.stderr = stderr_backup
+    
+    # Exit with appropriate status code
+    if result and result.get("status") == "error":
+        sys.exit(1)
     else:
-        # Normal execution
-        main()
+        sys.exit(0)
