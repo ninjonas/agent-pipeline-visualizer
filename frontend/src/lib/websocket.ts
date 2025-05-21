@@ -1,8 +1,31 @@
 // WebSocket service using Socket.IO
 import { io, Socket } from "socket.io-client";
 import { useEffect, useState } from "react";
+import { COUNTER_KEY } from "./constants";
+import { triggerUpdate } from "./updateManager";
 
 const BASE_URL = "http://localhost:4000";
+
+// Type definitions for clarity
+export interface Step {
+  status: "pending" | "running" | "completed" | "failed";
+  message: string;
+  updated_at: number;
+  data?: any;
+}
+
+export interface Pipeline {
+  id: string;
+  agent_name: string;
+  status: "initialized" | "in_progress" | "completed" | "failed";
+  created_at: number;
+  completed_steps: number;
+  total_steps: number;
+  steps: Record<string, Step>;
+  _updateId?: number;
+  _forcedUpdate?: number;
+  [COUNTER_KEY]?: number;
+}
 
 // Singleton socket instance
 let socket: Socket;
@@ -63,21 +86,8 @@ export const getSocket = (): Socket => {
 };
 
 // Hook for subscribing to pipeline updates
-// Helper to create a reactive state updater
-const createReactiveState = () => {
-  const [state, setState] = useState<any>(null);
-  const [counter, setCounter] = useState<number>(0);
-
-  const updateState = (updater: any) => {
-    setState(updater);
-    setCounter((c) => c + 1);
-  };
-
-  return { state, updateState, counter };
-};
-
 export const usePipelineSubscription = (pipelineId: string | null) => {
-  const [pipelineData, setPipelineData] = useState<any>(null);
+  const [pipelineData, setPipelineData] = useState<Pipeline | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [updateCounter, setUpdateCounter] = useState<number>(0); // Add counter to force re-renders
@@ -105,7 +115,7 @@ export const usePipelineSubscription = (pipelineId: string | null) => {
         if (response.ok) {
           const data = await response.json();
           setPipelineData({ ...data, _updateId: Date.now() }); // Add timestamp to force re-render
-          setUpdateCounter((c) => c + 1); // Increment counter to force re-render
+          setUpdateCounter((c: number) => c + 1); // Increment counter to force re-render
           setLoading(false);
           setError(null);
         } else {
@@ -124,9 +134,21 @@ export const usePipelineSubscription = (pipelineId: string | null) => {
     const handlePipelineUpdate = (data: any) => {
       if (data.pipeline_id === pipelineId) {
         console.log("WebSocket: Full pipeline update received");
-        // Add an update id to force React to see this as a new object
-        setPipelineData({ ...data.pipeline_data, _updateId: Date.now() });
-        setUpdateCounter((c) => c + 1); // Increment counter to force re-render
+        
+        // First update the pipeline data with the new data
+        const updateId = Date.now();
+        setPipelineData({ 
+          ...data.pipeline_data, 
+          _updateId: updateId
+        });
+        
+        // Then separately update the counter to trigger re-renders
+        setUpdateCounter(prevCounter => {
+          const newCounter = prevCounter + 1;
+          console.log(`Pipeline update counter: ${prevCounter} → ${newCounter}`);
+          return newCounter;
+        });
+        
         setLoading(false);
         setError(null);
       }
@@ -140,13 +162,15 @@ export const usePipelineSubscription = (pipelineId: string | null) => {
           data.step,
           data.pipeline_status
         );
-        setPipelineData((prev: any) => {
+        
+        // Update pipeline data without depending on the counter state
+        setPipelineData((prev: Pipeline | null) => {
           if (!prev) return null;
 
           // Create a deep copy with a new reference
           const updatedPipeline = {
             ...prev,
-            _updateId: Date.now(), // Add timestamp to force re-render
+            _updateId: Date.now()
           };
 
           // Update the steps object with the new step data
@@ -158,11 +182,16 @@ export const usePipelineSubscription = (pipelineId: string | null) => {
           // Update the pipeline status and counts
           updatedPipeline.status = data.pipeline_status;
           updatedPipeline.completed_steps = data.completed_steps;
-          updatedPipeline.total_steps =
-            data.total_steps || updatedPipeline.total_steps;
+          updatedPipeline.total_steps = data.total_steps || updatedPipeline.total_steps;
 
-          setUpdateCounter((c) => c + 1); // Increment counter to force re-render
           return updatedPipeline;
+        });
+        
+        // Separately update the counter to trigger re-renders
+        setUpdateCounter(prevCounter => {
+          const newCounter = prevCounter + 1;
+          console.log(`Step update counter: ${prevCounter} → ${newCounter}`);
+          return newCounter;
         });
       }
     };
@@ -171,24 +200,25 @@ export const usePipelineSubscription = (pipelineId: string | null) => {
     const handleStepStarted = (data: any) => {
       if (data.pipeline_id === pipelineId) {
         console.log("WebSocket: Step started:", data.step);
-        setPipelineData((prev: any) => {
+        
+        // Update pipeline data
+        setPipelineData((prev: Pipeline | null) => {
           if (!prev) return null;
 
           // Create a deep copy with a new reference
           const updatedPipeline = {
             ...prev,
-            _updateId: Date.now(), // Add timestamp to force re-render
-          };
-
-          // Update or add the step with 'running' status if it doesn't exist yet
-          updatedPipeline.steps = {
-            ...updatedPipeline.steps,
-            [data.step]: {
-              ...updatedPipeline.steps?.[data.step],
-              status: "running",
-              message: `Running step ${data.step}...`,
-              updated_at: data.timestamp || Date.now() / 1000,
-            },
+            _updateId: Date.now(),
+            // Update step information
+            steps: {
+              ...prev.steps,
+              [data.step]: {
+                ...prev.steps?.[data.step],
+                status: "running",
+                message: `Running step ${data.step}...`,
+                updated_at: data.timestamp || Date.now() / 1000,
+              },
+            }
           };
 
           // Update pipeline status to in_progress if not completed or failed
@@ -199,20 +229,35 @@ export const usePipelineSubscription = (pipelineId: string | null) => {
             updatedPipeline.status = "in_progress";
           }
 
-          setUpdateCounter((c) => c + 1); // Increment counter to force re-render
           return updatedPipeline;
         });
+        
+        // Separately update the counter
+        setUpdateCounter((c: number) => c + 1);
       }
     };
 
     // Debug helper to periodically force refresh
     const intervalId = setInterval(() => {
-      if (pipelineData) {
-        console.log("Periodic pipeline data refresh");
-        setPipelineData((prev: any) =>
-          prev ? { ...prev, _updateId: Date.now() } : null
-        );
-        setUpdateCounter((c: number) => c + 1);
+      // Don't use pipelineData in the dependency of this interval
+      // since it will be refreshed from outside
+      console.log("Periodic pipeline data refresh");
+      // Trigger a counter update without depending on pipelineData
+      setUpdateCounter(prevCounter => prevCounter + 1);
+      
+      // Instead of updating pipelineData here, fetch fresh data from the server
+      if (pipelineId) {
+        fetch(`http://localhost:4000/api/agent/status/${pipelineId}`)
+          .then(response => {
+            if (response.ok) return response.json();
+            throw new Error(`Failed to refresh pipeline data: ${response.status}`);
+          })
+          .then(data => {
+            setPipelineData({ ...data, _updateId: Date.now() });
+          })
+          .catch(err => {
+            console.error("Error in periodic refresh:", err);
+          });
       }
     }, 5000); // Every 5 seconds
 
@@ -230,143 +275,103 @@ export const usePipelineSubscription = (pipelineId: string | null) => {
       socket.off("step_updated", handleStepUpdate);
       socket.off("step_started", handleStepStarted);
     };
-  }, [pipelineId]);
+  }, [pipelineId]); // Remove pipelineData from dependency array to prevent infinite loops
+
+  // Listen for custom counter update events
+  useEffect(() => {
+    const handleCounterUpdate = () => {
+      setUpdateCounter((prevCounter: number) => prevCounter + 1);
+      console.log('Force updating pipeline counter from event');
+    };
+    
+    window.addEventListener('pipeline-counter-update', handleCounterUpdate);
+    
+    return () => {
+      window.removeEventListener('pipeline-counter-update', handleCounterUpdate);
+    };
+  }, []);
 
   return { pipelineData, loading, error, updateCounter };
 };
 
-// Hook for subscribing to all pipelines list
+// Hook for subscribing to pipelines list updates
 export const usePipelinesListSubscription = () => {
-  const [pipelines, setPipelines] = useState<any[]>([]);
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [updateCounter, setUpdateCounter] = useState<number>(0); // Add counter to force re-renders
+  const [updateCounter, setUpdateCounter] = useState<number>(0);
 
   useEffect(() => {
     const socket = getSocket();
 
-    // Subscribe to all pipelines updates
-    socket.emit("subscribe_all_pipelines");
-
     // Fetch initial pipelines list
-    const fetchInitialPipelines = async () => {
+    const fetchInitialData = async () => {
       try {
-        const response = await fetch(
-          `http://localhost:4000/api/agent/pipelines`
-        );
+        // Subscribe to pipelines list updates
+        socket.emit("subscribe_pipelines_list");
+
+        // Fetch current pipelines list
+        const response = await fetch(`http://localhost:4000/api/agent/pipelines`);
         if (response.ok) {
           const data = await response.json();
-          // Add update ID to each pipeline
-          const pipelinesWithIds = data.pipelines.map((p: any) => ({
-            ...p,
-            _updateId: Date.now(),
-          }));
-          setPipelines(pipelinesWithIds);
-          setUpdateCounter((c) => c + 1); // Increment counter to force re-render
+          setPipelines(data.pipelines || []);
+          setUpdateCounter((c: number) => c + 1);
           setLoading(false);
+          setError(null);
         } else {
-          throw new Error(`Failed to fetch pipelines: ${response.status}`);
+          throw new Error(`Failed to fetch pipelines list: ${response.status}`);
         }
       } catch (err) {
-        console.error("Error fetching initial pipelines:", err);
-        setError("Failed to load pipelines");
+        console.error("Error fetching initial pipelines list:", err);
+        setError("Failed to load pipelines list");
         setLoading(false);
       }
     };
 
-    fetchInitialPipelines();
+    fetchInitialData();
 
-    // Listen for pipeline list updates
+    // Listen for pipelines list updates
     const handlePipelinesListUpdate = (data: any) => {
       console.log("WebSocket: Pipelines list update received");
-      // Add an update ID to each pipeline to force React to see them as new objects
-      const pipelinesWithIds = data.pipelines.map((p: any) => ({
-        ...p,
-        _updateId: Date.now(),
-      }));
-      setPipelines(pipelinesWithIds);
-      setUpdateCounter((c) => c + 1); // Increment counter to force re-render
-      setLoading(false);
-      setError(null);
+      setPipelines(data.pipelines || []);
+      setUpdateCounter((c: number) => c + 1);
     };
 
-    // Also listen for individual pipeline registrations to update the list
-    const handlePipelineRegistered = (data: any) => {
-      console.log("WebSocket: Pipeline registered:", data.pipeline_id);
-      setPipelines((prev: any[]) => {
-        const existingIndex = prev.findIndex((p) => p.id === data.pipeline_id);
-        if (existingIndex >= 0) {
-          // Update existing pipeline
-          const updated = [...prev];
-          updated[existingIndex] = {
-            id: data.pipeline_id,
-            ...data.pipeline_data,
-            _updateId: Date.now(), // Add timestamp to force re-render
-          };
-          setUpdateCounter((c) => c + 1); // Increment counter to force re-render
-          return updated;
-        } else {
-          // Add new pipeline
-          const newPipelines = [
-            ...prev,
-            {
-              id: data.pipeline_id,
-              ...data.pipeline_data,
-              _updateId: Date.now(), // Add timestamp to force re-render
-            },
-          ];
-          setUpdateCounter((c) => c + 1); // Increment counter to force re-render
-          return newPipelines;
-        }
-      });
+    // Listen for new pipeline creation
+    const handlePipelineCreated = (data: any) => {
+      console.log("WebSocket: New pipeline created:", data.pipeline_id);
+      // Fetch the full pipelines list to make sure we have all the data
+      fetchInitialData();
     };
-
-    // Listen for step updates to update the pipeline list with latest status
-    const handleStepUpdate = (data: any) => {
-      console.log(
-        "WebSocket: Step update affecting pipeline status:",
-        data.pipeline_id
-      );
-      setPipelines((prev: any[]) => {
-        const existingIndex = prev.findIndex((p) => p.id === data.pipeline_id);
-        if (existingIndex >= 0) {
-          // Update existing pipeline with new status and completion count
-          const updated = [...prev];
-          updated[existingIndex] = {
-            ...updated[existingIndex],
-            status: data.pipeline_status,
-            completed_steps: data.completed_steps,
-            total_steps: data.total_steps || updated[existingIndex].total_steps,
-            _updateId: Date.now(), // Add timestamp to force re-render
-          };
-          setUpdateCounter((c) => c + 1); // Increment counter to force re-render
-          return updated;
-        }
-        return prev;
-      });
-    };
-
-    // Debug helper to periodically force refresh pipelines list
-    const intervalId = setInterval(() => {
-      if (pipelines.length > 0) {
-        console.log("Periodic pipelines list refresh");
-        setPipelines((prev: any[]) =>
-          prev.map((pipeline) => ({ ...pipeline, _updateId: Date.now() }))
-        );
-        setUpdateCounter((c: number) => c + 1);
-      }
-    }, 5000); // Every 5 seconds
 
     socket.on("pipelines_list_updated", handlePipelinesListUpdate);
-    socket.on("pipeline_registered", handlePipelineRegistered);
-    socket.on("step_updated", handleStepUpdate);
+    socket.on("pipeline_created", handlePipelineCreated);
+
+    // Debug helper to periodically force refresh
+    const intervalId = setInterval(() => {
+      fetchInitialData();
+    }, 10000); // Every 10 seconds
 
     // Clean up listeners when component unmounts
     return () => {
       clearInterval(intervalId);
       socket.off("pipelines_list_updated", handlePipelinesListUpdate);
-      socket.off("pipeline_registered", handlePipelineRegistered);
-      socket.off("step_updated", handleStepUpdate);
+      socket.off("pipeline_created", handlePipelineCreated);
+      socket.emit("unsubscribe_pipelines_list");
+    };
+  }, []);
+
+  // Listen for custom counter update events
+  useEffect(() => {
+    const handleCounterUpdate = () => {
+      setUpdateCounter((prevCounter: number) => prevCounter + 1);
+      console.log('Force updating pipelines list counter from event');
+    };
+    
+    window.addEventListener('pipelines-list-counter-update', handleCounterUpdate);
+    
+    return () => {
+      window.removeEventListener('pipelines-list-counter-update', handleCounterUpdate);
     };
   }, []);
 

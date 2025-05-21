@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { getSocket, initializeSocket } from "@/lib/websocket";
+import { useStepProgressManager } from "@/lib/pipelineUtils";
 
 interface StepExecutionProps {
   onStepExecuted?: (data: any) => void;
@@ -29,8 +30,12 @@ export default function AgentStepExecution({
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [availableSteps, setAvailableSteps] = useState<string[]>([]);
-  const [executingAllSteps, setExecutingAllSteps] = useState<boolean>(false);
-  const [currentStepIndex, setCurrentStepIndex] = useState<number>(-1);
+  
+  // Use the step progress manager instead of tracking current step index directly
+  const stepManager = useStepProgressManager(pipelineId, availableSteps);
+  
+  // Get executingAllSteps state from StepProgressManager
+  const executingAllSteps = stepManager.isExecutingAllSteps();
 
   // Update internal pipeline ID when selectedPipelineId prop changes
   useEffect(() => {
@@ -47,6 +52,15 @@ export default function AgentStepExecution({
     const onStepStarted = (data: any) => {
       if (data.pipeline_id === pipelineId) {
         console.log("WebSocket: Step started:", data.step);
+        
+        // Update result with current status info
+        setResult((prevResult: any) => ({
+          ...prevResult,
+          [data.step]: { status: 'running', started_at: Date.now() },
+          _lastStep: data.step,
+          _lastUpdate: Date.now(),
+          _lastAction: 'started'
+        }));
       }
     };
 
@@ -65,6 +79,7 @@ export default function AgentStepExecution({
           [data.step]: data.step_data,
           _lastStep: data.step,
           _lastResponse: data.step_data,
+          _lastUpdate: Date.now(),
           _pipeline_status: data.pipeline_status,
           _completed_steps: data.completed_steps,
           _total_steps: data.total_steps || prevResult?._total_steps,
@@ -96,7 +111,7 @@ export default function AgentStepExecution({
       socket.off("step_started", onStepStarted);
       socket.off("step_updated", onStepUpdated);
     };
-  }, [pipelineId, executingAllSteps, step]);
+  }, [pipelineId]);
 
   const executeStep = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -104,7 +119,7 @@ export default function AgentStepExecution({
     // Batch UI state updates to prevent flickering
     setLoading(true);
     setError(null);
-    if (!executingAllSteps) {
+    if (!stepManager.isExecutingAllSteps()) {
       setResult(null);
     }
 
@@ -126,7 +141,7 @@ export default function AgentStepExecution({
       });
 
       // Update results state based on execution context
-      if (!executingAllSteps) {
+      if (!stepManager.isExecutingAllSteps()) {
         // When executing a single step, replace entire result
         setResult(response);
       } else {
@@ -152,7 +167,7 @@ export default function AgentStepExecution({
     } finally {
       // Only update loading state when not executing all steps
       // to prevent unnecessary re-renders
-      if (!executingAllSteps) {
+      if (!stepManager.isExecutingAllSteps()) {
         setLoading(false);
       }
     }
@@ -163,7 +178,6 @@ export default function AgentStepExecution({
 
     // Batch all state updates together to prevent flickering
     setLoading(true);
-    setExecutingAllSteps(true);
     setError(null);
     setResult({
       message: "Starting execution of all steps...",
@@ -171,6 +185,12 @@ export default function AgentStepExecution({
       _completedSteps: 0,
       _totalSteps: availableSteps.length,
     });
+    
+    // Start executing all steps in StepProgressManager and reset counter to first step
+    stepManager.startExecutingAllSteps();
+    
+    // Set the current step index to -1 to indicate we're about to start execution
+    // This ensures the first moveToNextStep() call will set the index to 0
 
     // Ensure the parent knows which pipeline we're working with
     if (onPipelineSelected && pipelineId) {
@@ -190,6 +210,9 @@ export default function AgentStepExecution({
         _completedSteps: freshData.completed_steps || 0,
         _totalSteps: freshData.total_steps || availableSteps.length,
       }));
+      
+      // Update StepProgressManager with pipeline data
+      stepManager.updatePipelineData(freshData);
     } catch (error) {
       console.warn("Could not fetch initial pipeline data:", error);
     }
@@ -201,47 +224,58 @@ export default function AgentStepExecution({
 
     console.log("Starting execution of all steps:", availableSteps);
 
+    // Define a variable to track results for all executed steps
+    const allResults: Record<string, any> = {};
+
     try {
       // Make a copy of the steps array to avoid potential closure issues
       const stepsToExecute = [...availableSteps];
-      const allResults: Record<string, any> = {};
 
       for (let i = 0; i < stepsToExecute.length; i++) {
-        const currentStep = stepsToExecute[i];
+        // Move to next step in the StepProgressManager and trigger UI updates
+        stepManager.moveToNextStep();
+        
+        // Get the actual step name from the array
+        const stepName = stepsToExecute[i];
         console.log(
-          `Executing step ${i + 1}/${stepsToExecute.length}: ${currentStep}`
+          `Executing step ${i + 1}/${stepsToExecute.length}: ${stepName}`
         );
 
-        // Update current step index without triggering excessive re-renders
-        setCurrentStepIndex(i);
+        // Update step status to running in StepProgressManager immediately
+        // This allows pipeline list and detail views to show the current step
+        stepManager.updateStepData(stepName, {
+          status: 'running',
+          message: `Executing step ${i + 1}/${stepsToExecute.length}...`
+        });
 
-        // No need to update step state as it's only used for display
-        // and we already have the currentStep variable
+        // Notify parent that a step is starting to execute
+        if (onStepStarted) {
+          onStepStarted(stepName);
+        }
 
-        // Execute the current step directly instead of using the executeStep function
+        // Execute the step
         try {
-          // Notify parent that a step is starting to execute
-          // Use a more efficient approach that doesn't cause a state update in parent
-          if (onStepStarted) {
-            onStepStarted(currentStep);
-          }
-
-          // Execute the step
           const response = await api.post<any>("/api/agent/execute", {
             pipeline_id: pipelineId,
-            step: currentStep,
+            step: stepName,
           });
 
           // Store results to batch update later
-          allResults[currentStep] = response;
+          allResults[stepName] = response;
 
           // Update results state only once per step to reduce re-renders
           setResult((prevResult: any) => ({
             ...prevResult,
-            [currentStep]: response,
-            _lastStep: currentStep,
+            [stepName]: response,
+            _lastStep: stepName,
             _lastResponse: response,
           }));
+          
+          // Update step data in the StepProgressManager
+          stepManager.updateStepData(stepName, {
+            status: 'completed',
+            data: response
+          });
 
           // Notify parent that a step was executed
           if (onStepExecuted) {
@@ -251,7 +285,13 @@ export default function AgentStepExecution({
           // Short pause between steps for better UI responsiveness
           await new Promise((resolve) => setTimeout(resolve, 500));
         } catch (stepError) {
-          console.error(`Error executing step ${currentStep}:`, stepError);
+          // Update step status to failed in StepProgressManager
+          stepManager.updateStepData(stepName, {
+            status: 'failed',
+            error: stepError instanceof Error ? stepError.message : 'Unknown error'
+          });
+          
+          console.error(`Error executing step ${stepName}:`, stepError);
           throw stepError; // Re-throw to be caught by the outer try/catch
         }
       }
@@ -265,6 +305,25 @@ export default function AgentStepExecution({
         message: "All steps executed successfully!",
         completed: true,
       }));
+      
+      // Update pipeline status in StepProgressManager to show completion
+      stepManager.updatePipelineData({
+        status: 'completed',
+        completed_steps: availableSteps.length,
+        total_steps: availableSteps.length
+      });
+
+      // Make sure all steps are marked as completed
+      availableSteps.forEach(stepName => {
+        if (!allResults[stepName]) {
+          // If somehow we don't have results for a step, mark it as completed anyway
+          // This ensures the UI shows all steps as complete
+          stepManager.updateStepData(stepName, {
+            status: 'completed',
+            message: 'Step completed'
+          });
+        }
+      });
 
       // Longer delay before notifying completion to ensure UI stability
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -282,6 +341,25 @@ export default function AgentStepExecution({
           ? `Failed during step ${step}: ${err.message}`
           : "Failed to execute all steps"
       );
+      
+      // Update pipeline status in StepProgressManager to show failure
+      // Include the completed steps count to show partial progress
+      stepManager.updatePipelineData({
+        status: 'failed',
+        // Count how many steps have succeeded based on our results
+        completed_steps: Object.keys(allResults).length,
+        total_steps: availableSteps.length
+      });
+
+      // Ensure the UI reflects the current step as failed
+      const currentIndex = stepManager.currentStepIndex;
+      if (currentIndex >= 0 && currentIndex < availableSteps.length) {
+        const failedStepName = availableSteps[currentIndex];
+        stepManager.updateStepData(failedStepName, {
+          status: 'failed',
+          message: err instanceof Error ? err.message : 'Execution failed'
+        });
+      }
 
       // Longer delay before notifying completion
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -299,8 +377,7 @@ export default function AgentStepExecution({
 
       // Reset all states in one batch at the end
       setLoading(false);
-      setExecutingAllSteps(false);
-      setCurrentStepIndex(-1);
+      stepManager.stopExecutingAllSteps();
     }
   };
 
@@ -315,6 +392,10 @@ export default function AgentStepExecution({
       );
       const newPipelineId = response.pipeline_id;
       setPipelineId(newPipelineId);
+      
+      // Update StepProgressManager with new pipeline ID
+      stepManager.setPipelineId(newPipelineId);
+      
       setResult({
         message: `New pipeline registered with ID: ${newPipelineId}`,
         ...response,
@@ -395,7 +476,7 @@ export default function AgentStepExecution({
           >
             {availableSteps.map((s) => (
               <option key={s} value={s}>
-                {s.replace(/_/g, " ")}
+                {stepManager.formatStepName(s)}
               </option>
             ))}
           </select>
@@ -416,9 +497,7 @@ export default function AgentStepExecution({
             className="flex-1 bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
           >
             {executingAllSteps
-              ? `Running Step ${currentStepIndex + 1}/${
-                  availableSteps.length
-                }...`
+              ? `Running ${stepManager.getProgressText()} (${stepManager.getProgressPercentage()}%)`
               : "Execute All Steps"}
           </button>
         </div>
@@ -433,13 +512,57 @@ export default function AgentStepExecution({
       {result && (
         <div className="mt-4">
           <h3 className="font-medium mb-2">Result</h3>
-          <div className="p-3 bg-gray-800 rounded text-sm text-white">
-            <pre className="whitespace-pre-wrap">
-              {JSON.stringify(result, null, 2)}
-            </pre>
-          </div>
+          <ResultDisplay result={result} />
         </div>
       )}
     </div>
   );
 }
+
+// Result display component for showing JSON with fixed height and expand functionality
+interface ResultDisplayProps {
+  result: any;
+}
+
+const ResultDisplay: React.FC<ResultDisplayProps> = ({ result }) => {
+  const [expanded, setExpanded] = useState(false);
+  const [updateKey, setUpdateKey] = useState(0); // For forcing re-renders
+  
+  // Force a refresh when the result changes and also listen for pipeline updates
+  useEffect(() => {
+    console.log("Result changed:", result?._lastStep || "initial load");
+    setUpdateKey(prev => prev + 1);
+    
+    // Also listen for pipeline update events to refresh
+    const handlePipelineUpdate = () => {
+      console.log("Pipeline update event received in ResultDisplay");
+      setUpdateKey(prev => prev + 1);
+    };
+    
+    window.addEventListener('pipeline-update', handlePipelineUpdate);
+    
+    return () => {
+      window.removeEventListener('pipeline-update', handlePipelineUpdate);
+    };
+  }, [result]);
+  
+  const toggleExpand = () => {
+    setExpanded(!expanded);
+  };
+  
+  return (
+    <div className="relative">
+      <div className={`p-3 bg-gray-800 rounded text-sm text-white ${expanded ? '' : 'max-h-80 overflow-auto'}`}>
+        <pre className="whitespace-pre-wrap" key={updateKey}>
+          {JSON.stringify(result, null, 2)}
+        </pre>
+      </div>
+      <button 
+        onClick={toggleExpand}
+        className="mt-2 text-xs bg-gray-600 hover:bg-gray-700 text-white px-2 py-1 rounded"
+      >
+        {expanded ? 'Collapse' : 'Expand All'}
+      </button>
+    </div>
+  );
+};

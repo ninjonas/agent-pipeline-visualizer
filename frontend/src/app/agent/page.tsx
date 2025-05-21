@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import AgentStepExecution from "@/components/AgentStepExecution";
 import {
   usePipelineSubscription,
@@ -8,6 +8,10 @@ import {
   initializeSocket,
 } from "@/lib/websocket";
 import { api } from "@/lib/api";
+import { useStepProgressManager, PipelineData, PipelineStep } from "@/lib/pipelineUtils";
+import { COUNTER_KEY } from "@/lib/constants";
+import { useForceUpdate, triggerUpdate, startAutoUpdates } from "@/lib/updateManager";
+import { useGlobalCounter } from "@/lib/counterUtils";
 
 interface Step {
   status: "pending" | "running" | "completed" | "failed";
@@ -28,8 +32,11 @@ interface Pipeline {
 
 export default function AgentPage() {
   const [selectedPipeline, setSelectedPipeline] = useState<string | null>(null);
-  const [isExecutingAllSteps, setIsExecutingAllSteps] =
-    useState<boolean>(false);
+  const [isExecutingAllSteps, setIsExecutingAllSteps] = useState<boolean>(false);
+  const [availableSteps, setAvailableSteps] = useState<string[]>([]);
+
+  // Use the StepProgressManager for tracking execution progress
+  const stepManager = useStepProgressManager(selectedPipeline || "", availableSteps);
 
   // Use WebSocket subscriptions instead of manual HTTP polling
   const {
@@ -42,6 +49,24 @@ export default function AgentPage() {
     loading,
     updateCounter: pipelineUpdateCounter,
   } = usePipelineSubscription(selectedPipeline);
+
+  // Fetch available steps when component mounts
+  useEffect(() => {
+    const fetchSteps = async () => {
+      try {
+        const data = await api.get<{ steps: string[] }>("/api/steps");
+        setAvailableSteps(data.steps);
+        // Update step manager with available steps
+        if (data.steps.length > 0 && stepManager) {
+          stepManager.setAvailableSteps(data.steps);
+        }
+      } catch (err) {
+        console.error("Failed to fetch available steps", err);
+      }
+    };
+
+    fetchSteps();
+  }, []);
 
   // Initialize WebSocket connection when component mounts
   useEffect(() => {
@@ -57,6 +82,46 @@ export default function AgentPage() {
       });
     }
   }, [pipelines, pipelinesUpdateCounter]);
+
+  // Helper function to normalize pipeline data from WebSocket to match PipelineData
+  const normalizePipelineData = (pipeline: Pipeline): Partial<PipelineData> => {
+    if (!pipeline) return {};
+    
+    const normalizedSteps: Record<string, PipelineStep> = {};
+    
+    // Convert Step objects to PipelineStep objects
+    if (pipeline.steps) {
+      Object.entries(pipeline.steps).forEach(([key, step]) => {
+        normalizedSteps[key] = {
+          name: key,  // Add the key as the name
+          status: step.status,
+          message: step.message,
+          data: step.data,
+          updated_at: step.updated_at,
+          timestamp: step.updated_at * 1000 // Convert seconds to milliseconds for timestamp
+        };
+      });
+    }
+    
+    return {
+      id: pipeline.id,
+      agent_name: pipeline.agent_name,
+      status: pipeline.status,
+      created_at: pipeline.created_at,
+      total_steps: pipeline.total_steps,
+      completed_steps: pipeline.completed_steps,
+      steps: normalizedSteps,
+      lastUpdated: Date.now()
+    };
+  };
+
+  // Update step manager when pipeline data changes
+  useEffect(() => {
+    if (pipelineData && stepManager) {
+      const normalizedData = normalizePipelineData(pipelineData);
+      stepManager.updatePipelineData(normalizedData);
+    }
+  }, [pipelineData, stepManager]);
 
   // Polling fallback for pipeline data in case WebSocket fails
   useEffect(() => {
@@ -183,6 +248,70 @@ export default function AgentPage() {
     });
   };
 
+  // Add a debug component to show the counter
+  const DebugCounter = ({ value, label }: { value: number, label: string }) => {
+    return (
+      <div className="text-xs text-gray-400 absolute top-1 right-1">
+        {label}: {value}
+      </div>
+    );
+  };
+
+  // Add a periodic refresh for pipeline details
+  useEffect(() => {
+    if (pipelineData && !isExecutingAllSteps) {
+      // Create a timer that forces a counter update every 2 seconds
+      const refreshTimer = setInterval(() => {
+        // This will directly increment the counter to force a re-render
+        // without having to refetch data from the server
+        const event = new CustomEvent('pipeline-counter-update');
+        window.dispatchEvent(event);
+      }, 2000);
+      
+      return () => clearInterval(refreshTimer);
+    }
+  }, [pipelineData, isExecutingAllSteps]);
+
+  // Use our force update mechanism for both pipeline and pipelines
+  const pipelineForceUpdateKey = useForceUpdate('pipeline');
+  const pipelinesForceUpdateKey = useForceUpdate('pipelines');
+  
+  // Start auto updates
+  useEffect(() => {
+    startAutoUpdates();
+    
+    // Trigger updates every time selected pipeline changes
+    if (selectedPipeline) {
+      triggerUpdate('pipeline');
+    }
+  }, [selectedPipeline]);
+  
+  // Debug logging with update keys visible
+  useEffect(() => {
+    console.log(`Force update keys: pipeline=${pipelineForceUpdateKey}, pipelines=${pipelinesForceUpdateKey}`);
+  }, [pipelineForceUpdateKey, pipelinesForceUpdateKey]);
+
+  // Listen for pipeline update events
+  useEffect(() => {
+    const handlePipelineUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      console.log('Pipeline update event received:', customEvent.detail);
+      // Force a re-render by increasing our force update key
+      if (customEvent.detail.pipelineId === selectedPipeline) {
+        triggerUpdate('pipeline');
+      } else {
+        // Update all pipelines if it's a different pipeline
+        triggerUpdate('pipelines');
+      }
+    };
+    
+    window.addEventListener('pipeline-update', handlePipelineUpdate);
+    
+    return () => {
+      window.removeEventListener('pipeline-update', handlePipelineUpdate);
+    };
+  }, [selectedPipeline]);
+
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold mb-8">Agent Pipeline Visualizer</h1>
@@ -193,8 +322,9 @@ export default function AgentPage() {
           onPipelineSelected={(pipelineId) => {
             console.log(`Pipeline selected: ${pipelineId}`);
             setSelectedPipeline(pipelineId);
+            stepManager.setPipelineId(pipelineId);
           }}
-          onStepExecuted={() => {
+          onStepExecuted={(data) => {
             // No need for manual refreshes when using WebSockets
             console.log("Step executed via WebSocket");
           }}
@@ -204,10 +334,18 @@ export default function AgentPage() {
           onAllStepsStarted={() => {
             console.log("All steps execution started");
             setIsExecutingAllSteps(true);
+            // Make sure StepProgressManager is in sync
+            stepManager.startExecutingAllSteps();
           }}
           onAllStepsCompleted={() => {
             console.log("All steps execution completed");
             setIsExecutingAllSteps(false);
+            // Make sure StepProgressManager is in sync
+            stepManager.stopExecutingAllSteps();
+            // Refresh the pipeline data
+            if (selectedPipeline) {
+              stepManager.fetchPipelineStatus();
+            }
           }}
         />
       </div>
@@ -224,33 +362,46 @@ export default function AgentPage() {
           </p>
         ) : (
           <div
-            className="flex flex-wrap gap-4"
-            key={`pipelines-wrapper-${pipelinesUpdateCounter}`}
+            className="flex flex-wrap gap-4 relative"
+            key={`pipelines-wrapper-${pipelinesForceUpdateKey}`}
           >
-            {pipelines.map((pipeline) => (
-              <button
-                id={`pipeline-${pipeline.id}`}
-                key={`pipeline-${pipeline.id}`}
-                onClick={() => setSelectedPipeline(pipeline.id)}
-                className={`px-4 py-2 rounded-lg transition-all duration-200 ${
-                  selectedPipeline === pipeline.id
-                    ? "bg-blue-600 text-white ring-2 ring-blue-300"
-                    : "bg-gray-200 text-gray-900 hover:bg-gray-300"
-                }`}
-              >
-                <div className="font-medium">{pipeline.agent_name}</div>
-                <div className="text-sm">
-                  {pipeline.completed_steps}/{pipeline.total_steps} steps
-                </div>
-                <div
-                  className={`text-xs mt-1 px-2 py-1 rounded-full ${getStatusColor(
-                    pipeline.status
-                  )} text-white`}
+            <DebugCounter value={pipelinesForceUpdateKey} label="List Updates" />
+            {pipelines.map((pipeline: Pipeline) => {
+              // Check if this is the currently executing pipeline
+              const isExecuting = selectedPipeline === pipeline.id && stepManager.isExecutingAllSteps();
+              const executionProgress = isExecuting ? 
+                ` (${stepManager.getProgressText()})` : '';
+              
+              return (
+                <button
+                  id={`pipeline-${pipeline.id}`}
+                  key={`pipeline-${pipeline.id}-${pipelinesForceUpdateKey}`}
+                  onClick={() => setSelectedPipeline(pipeline.id)}
+                  className={`px-4 py-2 rounded-lg transition-all duration-200 ${
+                    selectedPipeline === pipeline.id
+                      ? isExecuting 
+                        ? "bg-green-600 text-white ring-2 ring-green-300"
+                        : "bg-blue-600 text-white ring-2 ring-blue-300"
+                      : "bg-gray-200 text-gray-900 hover:bg-gray-300"
+                  }`}
                 >
-                  {pipeline.status}
-                </div>
-              </button>
-            ))}
+                  <div className="font-medium">{pipeline.agent_name}</div>
+                  <div className="text-sm">
+                    {/* Add key to force re-render */}
+                    <span key={`steps-${pipelinesForceUpdateKey}-${pipeline.id}`}>
+                      {pipeline.completed_steps}/{pipeline.total_steps} steps{executionProgress}
+                    </span>
+                  </div>
+                  <div
+                    className={`text-xs mt-1 px-2 py-1 rounded-full ${
+                      isExecuting ? "bg-green-500" : getStatusColor(pipeline.status)
+                    } text-white`}
+                  >
+                    {isExecuting ? "running" : pipeline.status}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -270,9 +421,10 @@ export default function AgentPage() {
             </div>
           ) : pipelineData ? (
             <div
-              className="bg-white shadow-lg rounded-lg overflow-hidden"
-              key={`pipeline-details-${pipelineUpdateCounter}`}
+              className="bg-white shadow-lg rounded-lg overflow-hidden relative"
+              key={`pipeline-details-${pipelineForceUpdateKey}`}
             >
+              <DebugCounter value={pipelineForceUpdateKey} label="Updates" />
               <div className="bg-gray-100 px-6 py-4">
                 <div className="flex justify-between items-center">
                   <div>
@@ -286,52 +438,57 @@ export default function AgentPage() {
                       Created: {formatTimestamp(pipelineData.created_at)}
                     </p>
                     {/* Hidden counter to force re-renders */}
-                    <span className="hidden">{pipelineUpdateCounter}</span>
+                    <span className="hidden">{pipelineForceUpdateKey}</span>
                   </div>
                   <div
-                    className={`px-4 py-2 rounded-full ${getStatusColor(
-                      pipelineData.status
-                    )} text-white`}
+                    className={`px-4 py-2 rounded-full ${
+                      stepManager.isExecutingAllSteps() 
+                        ? "bg-green-500" 
+                        : getStatusColor(pipelineData.status)
+                    } text-white`}
+                    key={`status-${pipelineForceUpdateKey}`}
                   >
-                    {pipelineData.status}
+                    {stepManager.isExecutingAllSteps() 
+                      ? `Running ${stepManager.getProgressText()}`
+                      : pipelineData.status}
                   </div>
                 </div>
                 <div className="mt-2">
-                  {/* Update counter forces re-renders */}
-                  <div className="w-full bg-gray-300 rounded-full h-2.5 mb-1">
+                  {/* Progress bar with key to force re-render */}
+                  <div className="w-full bg-gray-300 rounded-full h-2.5 mb-1" key={`progress-${pipelineForceUpdateKey}`}>
                     <div
-                      className={`h-2.5 rounded-full ${getStatusColor(
-                        pipelineData.status
-                      )}`}
+                      className={`h-2.5 rounded-full ${
+                        stepManager.isExecutingAllSteps() 
+                          ? "bg-green-500" 
+                          : getStatusColor(pipelineData.status)
+                      }`}
                       style={{
                         width: `${
-                          (pipelineData.completed_steps /
-                            pipelineData.total_steps) *
-                          100
+                          stepManager.isExecutingAllSteps()
+                            ? stepManager.getProgressPercentage()
+                            : (pipelineData.completed_steps / pipelineData.total_steps) * 100
                         }%`,
                       }}
                     />
-                    {/* Hidden counter to force re-renders */}
-                    <span className="hidden">{pipelineUpdateCounter}</span>
                   </div>
-                  <p className="text-sm text-right text-gray-900 font-medium">
-                    {pipelineData.completed_steps} of {pipelineData.total_steps}{" "}
-                    steps completed
+                  <p className="text-sm text-right text-gray-900 font-medium" key={`progress-text-${pipelineForceUpdateKey}`}>
+                    <span className="inline-block">{stepManager.isExecutingAllSteps()
+                      ? stepManager.getProgressText()
+                      : `${pipelineData.completed_steps} of ${pipelineData.total_steps} steps completed`}</span>
                   </p>
                 </div>
               </div>
 
               <div className="px-6 py-4">
                 <h4 className="font-semibold mb-4 text-gray-900">
-                  Pipeline Steps
+                  Pipeline Steps {/* Add update counter inline to force re-renders */}
+                  <span className="hidden" key={`force-update-${pipelineForceUpdateKey}`}>{pipelineForceUpdateKey}</span>
                 </h4>
                 {/* Update counter used to force re-renders */}
-                <div className="space-y-6">
-                  {/* Hidden counter to force re-renders */}
-                  <span className="hidden">{pipelineUpdateCounter}</span>
+                <div className="space-y-6" key={`steps-wrapper-${pipelineForceUpdateKey}`}>
                   {getOrderedSteps().map(([stepName, step], index) => (
                     <div
-                      key={`${stepName}-${step.status || "pending"}`}
+                      key={`${stepName}-${step.status || "pending"}-${pipelineForceUpdateKey}`}
                       className="relative"
                     >
                       {/* Connecting line */}
@@ -341,31 +498,43 @@ export default function AgentPage() {
 
                       <div className="flex">
                         <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center ${getStatusColor(
-                            step.status
-                          )} text-white z-10`}
+                          className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                            stepManager.isExecutingAllSteps() && 
+                            stepManager.getCurrentStepInfo().name === stepName
+                              ? "bg-green-500 animate-pulse" 
+                              : getStatusColor(step.status)
+                          } text-white z-10`}
                         >
-                          {step.status === "completed"
-                            ? "✓"
-                            : step.status === "failed"
-                            ? "✗"
-                            : step.status === "running"
+                          {stepManager.isExecutingAllSteps() && 
+                           stepManager.getCurrentStepInfo().name === stepName
                             ? "►"
-                            : step.status === "pending"
-                            ? "○"
-                            : "○"}
+                            : step.status === "completed"
+                              ? "✓"
+                              : step.status === "failed"
+                                ? "✗"
+                                : step.status === "running"
+                                  ? "►"
+                                  : step.status === "pending"
+                                    ? "○"
+                                    : "○"}
                         </div>
                         <div className="ml-4 flex-1">
                           <div className="flex justify-between">
                             <h5 className="font-semibold capitalize text-gray-900">
-                              {stepName.replace(/_/g, " ")}
+                              {stepManager.formatStepName(stepName)}
                             </h5>
                             <span
-                              className={`text-xs px-2 py-1 rounded-full ${getStatusColor(
-                                step.status
-                              )} text-white`}
+                              className={`text-xs px-2 py-1 rounded-full ${
+                                stepManager.isExecutingAllSteps() && 
+                                stepManager.getCurrentStepInfo().name === stepName
+                                  ? "bg-green-500 animate-pulse" 
+                                  : getStatusColor(step.status)
+                              } text-white`}
                             >
-                              {step.status}
+                              {stepManager.isExecutingAllSteps() && 
+                               stepManager.getCurrentStepInfo().name === stepName
+                                ? "executing..."
+                                : step.status}
                             </span>
                           </div>
                           <p className="text-gray-900">{step.message}</p>

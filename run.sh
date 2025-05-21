@@ -67,8 +67,13 @@ AGENT_DIR="$(pwd)/agent"
 run_frontend() {
   local websocket_mode=${1:-"no"}
   
-  echo -e "${YELLOW}Starting Next.js frontend...${NC}"
+  echo -e "${YELLOW}Setting up Next.js frontend...${NC}"
   cd "$FRONTEND_DIR"
+  
+  # Install all dependencies
+  echo -e "${YELLOW}Installing frontend dependencies...${NC}"
+  npm install
+  echo -e "${GREEN}Frontend dependencies installed${NC}"
   
   # Install socket.io-client if in websocket mode
   if [ "$websocket_mode" == "websocket" ]; then
@@ -82,7 +87,9 @@ run_frontend() {
     fi
   fi
   
-  npm run dev &
+  echo -e "${YELLOW}Starting Next.js frontend...${NC}"
+  # Use npx to ensure next is available
+  npx next dev -p 3000 &
   FRONTEND_PID=$!
   echo -e "${GREEN}Frontend started at http://localhost:3000${NC}"
 }
@@ -91,9 +98,21 @@ run_frontend() {
 run_backend() {
   local websocket_mode=${1:-"no"}
   
-  echo -e "${YELLOW}Starting Flask backend...${NC}"
+  echo -e "${YELLOW}Setting up Flask backend...${NC}"
   cd "$BACKEND_DIR"
+  
+  # Check if virtual environment exists, if not create it
+  if [ ! -d "venv" ]; then
+    echo -e "${BLUE}Creating virtual environment for backend...${NC}"
+    python -m venv venv
+  fi
+  
   source venv/bin/activate
+  
+  # Install all dependencies
+  echo -e "${YELLOW}Installing backend dependencies...${NC}"
+  pip install -r requirements.txt
+  echo -e "${GREEN}Backend dependencies installed${NC}"
   
   # Install WebSocket dependencies if in websocket mode
   if [ "$websocket_mode" == "websocket" ]; then
@@ -102,6 +121,7 @@ run_backend() {
     echo -e "${GREEN}WebSocket dependencies installed${NC}"
   fi
   
+  echo -e "${YELLOW}Starting Flask backend...${NC}"
   # Use -u for unbuffered output to prevent issues with SIGINT handling
   PYTHONUNBUFFERED=1 exec python app.py &
   BACKEND_PID=$!
@@ -122,10 +142,14 @@ setup_agent() {
     echo -e "${BLUE}Creating virtual environment for agent...${NC}"
     cd "$AGENT_DIR"
     python -m venv venv
-    source venv/bin/activate
-    pip install -r requirements.txt
-    deactivate
   fi
+  
+  cd "$AGENT_DIR"
+  source venv/bin/activate
+  echo -e "${YELLOW}Installing agent dependencies...${NC}"
+  pip install -r requirements.txt
+  echo -e "${GREEN}Agent dependencies installed${NC}"
+  deactivate
   
   echo -e "${GREEN}Agent environment ready.${NC}"
 }
