@@ -69,10 +69,13 @@ class PipelineAgent:
         with open(config_path, "r", encoding="utf-8") as config_file:
             config = json.load(config_file)
             self.steps = config.get("steps", [])
+            # Load acknowledgment feature config
+            self.steps_requiring_acknowledgment = config.get("steps_requiring_acknowledgment", {})
         
         self.step_status = {step: "pending" for step in self.steps}
         self.current_step = None
         self.results = {}
+        self.pending_acknowledgment = None
     
     def register_pipeline(self) -> str:
         """Register a new pipeline (simulated)"""
@@ -111,6 +114,15 @@ class PipelineAgent:
         if self.step_status[step_name] == "completed":
             return {"status": "skipped", "message": f"Step '{step_name}' already completed"}
         
+        # Check if there's a pending acknowledgment
+        if self.pending_acknowledgment:
+            return {
+                "status": "waiting_for_acknowledgment",
+                "message": f"Waiting for user acknowledgment for step '{self.pending_acknowledgment}'",
+                "requires_acknowledgment": True,
+                "pending_step": self.pending_acknowledgment
+            }
+        
         self.current_step = step_name
         self.update_step_status(step_name, "running", f"Starting {step_name}...")
         
@@ -121,8 +133,25 @@ class PipelineAgent:
         # Try to use actual step implementations if available, otherwise simulate
         step_result = self._process_step(step_name)
         
-        # Update step status based on result
-        if step_result["status"] == "success":
+        # Check if step requires acknowledgment
+        requires_acknowledgment = (
+            step_name in self.steps_requiring_acknowledgment and
+            self.steps_requiring_acknowledgment.get(step_name, False)
+        )
+        
+        if requires_acknowledgment:
+            # Set pending acknowledgment and update status
+            self.pending_acknowledgment = step_name
+            self.update_step_status(
+                step_name, 
+                "waiting_for_acknowledgment", 
+                f"Completed {step_name} in {processing_time:.2f}s, waiting for user acknowledgment",
+                step_result["data"]
+            )
+            # Add acknowledgment flag to the result
+            step_result["requires_acknowledgment"] = True
+        elif step_result["status"] == "success":
+            # Normal successful completion without acknowledgment required
             self.update_step_status(
                 step_name, 
                 "completed", 
@@ -130,6 +159,7 @@ class PipelineAgent:
                 step_result["data"]
             )
         else:
+            # Failed step
             self.update_step_status(
                 step_name, 
                 "failed", 
@@ -278,6 +308,44 @@ class PipelineAgent:
             "steps": self.step_status,
             "current_step": self.current_step,
             "results": self.results
+        }
+    
+    def acknowledge_step(self, step_name: str) -> Dict[str, Any]:
+        """
+        Acknowledge a step that was waiting for user confirmation.
+        
+        Args:
+            step_name: The name of the step to acknowledge
+            
+        Returns:
+            Dict with status of the acknowledgment
+        """
+        if not self.pending_acknowledgment:
+            return {
+                "status": "error",
+                "message": "No step is waiting for acknowledgment"
+            }
+            
+        if self.pending_acknowledgment != step_name:
+            return {
+                "status": "error",
+                "message": f"Step {step_name} is not waiting for acknowledgment. {self.pending_acknowledgment} is."
+            }
+            
+        # Mark the step as completed
+        self.update_step_status(
+            step_name,
+            "completed",
+            f"Step {step_name} acknowledged by user"
+        )
+        
+        # Clear the pending acknowledgment
+        self.pending_acknowledgment = None
+        
+        return {
+            "status": "success",
+            "message": f"Step {step_name} acknowledged",
+            "step": step_name
         }
 
 

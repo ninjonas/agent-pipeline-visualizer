@@ -423,6 +423,44 @@ export default function AgentStepExecution({
     }
   };
 
+  // Function to acknowledge a step that requires user confirmation
+  const acknowledgeStep = async (stepName: string) => {
+    if (!pipelineId) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Make a direct API call to acknowledge the step
+      const response = await api.post<any>("/api/agent/acknowledge", {
+        pipeline_id: pipelineId,
+        step: stepName,
+      });
+      
+      // Update the step result with the acknowledgment response
+      setResult((prevResult: any) => ({
+        ...prevResult,
+        [stepName]: {
+          ...prevResult?.[stepName],
+          status: 'completed',
+          acknowledged: true,
+          message: `Step '${stepName}' acknowledged by user`,
+        }
+      }));
+      
+      console.log(`Step '${stepName}' acknowledged successfully`);
+    } catch (err) {
+      console.error(`Error acknowledging step ${stepName}:`, err);
+      setError(
+        err instanceof Error
+          ? `Failed to acknowledge step ${stepName}: ${err.message}`
+          : `Failed to acknowledge step ${stepName}`
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="bg-white shadow-lg rounded-lg p-6">
       <h2 className="text-xl font-semibold mb-4 text-gray-900">
@@ -539,6 +577,33 @@ export default function AgentStepExecution({
         <div className="mt-4">
           <h3 className="font-medium mb-2">Result</h3>
           <ResultDisplay result={result} />
+        </div>
+      )}
+
+      {/* Display acknowledgment button if a step is waiting for user acknowledgment */}
+      {result && Object.entries(result).some(([key, value]: [string, any]) => 
+        (value?.status === 'waiting_for_acknowledgment' || value?.requires_acknowledgment === true)
+      ) && (
+        <div className="mt-4 p-4 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 rounded">
+          <h3 className="font-medium mb-2">Step Requires Acknowledgment</h3>
+          {Object.entries(result).map(([key, value]: [string, any]) => {
+            if (value?.status === 'waiting_for_acknowledgment' || value?.requires_acknowledgment === true) {
+              return (
+                <div key={key} className="mb-2">
+                  <p className="mb-2">Step <strong>{key}</strong> is waiting for your confirmation to continue.</p>
+                  <p className="mb-2 text-sm">{value?.message || 'Please review the results and acknowledge to continue.'}</p>
+                  <button
+                    onClick={() => acknowledgeStep(key)}
+                    disabled={loading}
+                    className="bg-yellow-600 text-white py-2 px-4 rounded hover:bg-yellow-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  >
+                    {loading ? "Acknowledging..." : "Acknowledge and Continue"}
+                  </button>
+                </div>
+              );
+            }
+            return null;
+          })}
         </div>
       )}
     </div>

@@ -104,5 +104,17 @@ export const api = {
 
       return api.post<{ status: string }>("/api/agent/update", payload);
     },
+
+    // Acknowledge a step that requires user confirmation
+    acknowledgeStep: async (pipelineId: string, step: string, comment?: string) => {
+      return api.post<{ status: string, message: string, pipeline_id: string, step: string }>(
+        "/api/agent/acknowledge", 
+        {
+          pipeline_id: pipelineId,
+          step,
+          comment
+        }
+      );
+    },
   },
 };

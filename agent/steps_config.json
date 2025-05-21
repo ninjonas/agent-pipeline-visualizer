@@ -8,5 +8,15 @@
     "update_development_item",
     "timely_feedback",
     "coaching"
-  ]
+  ],
+  "steps_requiring_acknowledgment": {
+    "data_analysis": false,
+    "evaluation_generation": true,
+    "create_contribution_goal": true,
+    "create_development_item": false,
+    "update_contribution_goal": false,
+    "update_development_item": false,
+    "timely_feedback": true,
+    "coaching": false
+  }
 }

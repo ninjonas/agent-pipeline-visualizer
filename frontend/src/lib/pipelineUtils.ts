@@ -5,11 +5,12 @@ import { triggerUpdate } from './updateManager';
 
 export interface PipelineStep {
   name?: string;  // Make name optional to match Step from websocket.ts
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'waiting_for_acknowledgment';
   message?: string; // Add message field to match Step from websocket.ts
   data?: any;
   timestamp?: number;
   updated_at?: number; // Add updated_at field to match Step from websocket.ts
+  requires_acknowledgment?: boolean;
 }
 
 export interface PipelineData {

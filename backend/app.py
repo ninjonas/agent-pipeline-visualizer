@@ -453,6 +453,115 @@ def list_steps():
         'steps': steps
     })
 
+@app.route('/api/agent/acknowledge', methods=['POST'])
+def acknowledge_step():
+    """
+    Acknowledge a step that was waiting for user confirmation.
+    This allows the pipeline to continue execution.
+    """
+    data = request.json
+    pipeline_id = data.get('pipeline_id')
+    step = data.get('step')
+    comment = data.get('comment', '')
+    
+    if not pipeline_id or not step:
+        return jsonify({
+            'error': 'Missing required fields'
+        }), 400
+    
+    if pipeline_id not in pipelines:
+        return jsonify({
+            'error': f'Pipeline ID {pipeline_id} not found'
+        }), 404
+    
+    # Get the current pipeline status
+    pipeline = pipelines[pipeline_id]
+    
+    # Verify step is in waiting_for_acknowledgment state
+    if step not in pipeline['steps'] or pipeline['steps'][step].get('status') != 'waiting_for_acknowledgment':
+        return jsonify({
+            'error': f'Step {step} is not waiting for acknowledgment'
+        }), 400
+    
+    # Execute the acknowledgment using the agent's client.py
+    agent_dir = os.path.join(os.path.dirname(__file__), '../agent')
+    client_file = os.path.join(agent_dir, 'client.py')
+    
+    if not os.path.exists(client_file):
+        return jsonify({
+            'error': 'Agent client.py not found'
+        }), 500
+    
+    # Create a unique output file for this run
+    import tempfile
+    import subprocess
+    temp_output_file = tempfile.NamedTemporaryFile(delete=False, mode='w+')
+    temp_output_path = temp_output_file.name
+    temp_output_file.close()
+    
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env_vars = dict(os.environ, 
+                PYTHONPATH=parent_dir, 
+                AGENT_API_MODE="1",
+                PYTHONUNBUFFERED="1")
+    
+    try:
+        # Run the agent with output redirected to our file
+        with open(temp_output_path, 'w') as output_file:
+            subprocess.run(
+                [sys.executable, client_file, '--acknowledge', '--step', step, '--pipeline-id', pipeline_id, '--api-mode'],
+                cwd=agent_dir,
+                stdout=output_file,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env_vars
+            )
+        
+        # Update pipeline step status
+        pipeline['steps'][step] = {
+            'status': 'completed',
+            'message': f'Step {step} acknowledged by user' + (f': "{comment}"' if comment else ''),
+            'updated_at': time.time()
+        }
+        
+        # Update completed steps counter
+        completed_steps = sum(1 for s in pipeline['steps'].values() if s.get('status') == 'completed')
+        pipeline['completed_steps'] = completed_steps
+        
+        # Emit WebSocket events
+        socketio.emit('step_updated', {
+            'pipeline_id': pipeline_id,
+            'step': step,
+            'step_data': pipeline['steps'][step],
+            'pipeline_status': pipeline['status'],
+            'completed_steps': completed_steps,
+            'total_steps': pipeline['total_steps'],
+            'acknowledgment': True
+        })
+        
+        socketio.emit('pipeline_updated', {
+            'pipeline_id': pipeline_id,
+            'pipeline_data': pipeline
+        })
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Acknowledged step {step}' + (f' with comment: "{comment}"' if comment else ''),
+            'pipeline_id': pipeline_id,
+            'step': step,
+            'comment': comment if comment else None
+        })
+        
+    except Exception as e:
+        logger.error(f"Error acknowledging step: {e}")
+        return jsonify({
+            'error': f'Error acknowledging step: {str(e)}'
+        }), 500
+    finally:
+        # Clean up temp file
+        if os.path.exists(temp_output_path):
+            os.unlink(temp_output_path)
+
 def update_pipeline_status(pipeline_id):
     """Update the overall status of a pipeline based on its steps"""
     if pipeline_id not in pipelines:

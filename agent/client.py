@@ -1,6 +1,74 @@
 #!/usr/bin/env python3
 """
-Client script to interact with the PipelineAgent.
+Client script t    api_url = args.api_url
+    step_name = args.step
+    mode = args.mode
+    api_mode_flag = args.api_mode
+    acknowledge_mode = args.acknowledge
+    
+    # Set pipeline ID if provided
+    if args.pipeline_id:
+        setattr(sys, "pipeline_id", args.pipeline_id)
+    
+    # Create agent instance
+    agent = PipelineAgent(api_url=api_url)
+    
+    # Register pipeline
+    pipeline_id = agent.register_pipeline()
+    
+    output = {}
+    try:
+        # Handle acknowledgment mode
+        if acknowledge_mode:
+            # Acknowledge a step that was waiting for user confirmation
+            if not step_name:
+                error_output = {
+                    "pipeline_id": pipeline_id,
+                    "status": "error",
+                    "message": "Step parameter is required for acknowledgment",
+                    "data": {}
+                }
+                if api_mode_flag:
+                    print(json.dumps(error_output))
+                else:
+                    print("Error: Step parameter is required for acknowledgment")
+                return error_output
+            
+            # Call the acknowledge_step method
+            if api_mode_flag:
+                # When in API mode, capture stdout and return JSON
+                try:
+                    original_stdout = sys.stdout
+                    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+                    ack_result = agent.acknowledge_step(step_name)
+                    
+                    output = {
+                        "pipeline_id": pipeline_id,
+                        "status": ack_result["status"],
+                        "message": ack_result["message"],
+                        "step": step_name
+                    }
+                finally:
+                    if "original_stdout" in locals():
+                        sys.stdout = original_stdout
+                        print(json.dumps(output))
+            else:
+                # Human-readable output
+                ack_result = agent.acknowledge_step(step_name)
+                status_emoji = "✅" if ack_result["status"] == "success" else "❌"
+                print(f"{status_emoji} Step '{step_name}' acknowledgment: {ack_result['status']}")
+                print(f"Message: {ack_result['message']}")
+                
+                output = {
+                    "pipeline_id": pipeline_id,
+                    "status": ack_result["status"],
+                    "message": ack_result["message"],
+                    "step": step_name
+                }
+            
+            return output
+            
+        elif mode == "full":e PipelineAgent.
 Demonstrates how to use the agent in a client application.
 """
 
@@ -27,13 +95,15 @@ def main():
     parser.add_argument("--mode", choices=["full", "step"], default="step",
                         help="Run full pipeline or step-by-step")
     parser.add_argument("--step", type=str, 
-                        help="Specific step to run (only with --mode=step)")
+                        help="Specific step to run or acknowledge (depending on mode)")
     parser.add_argument("--api-url", type=str, default="http://localhost:4000",
                         help="Backend API URL")
     parser.add_argument("--pipeline-id", type=str, default=None,
                         help="ID of an existing pipeline to update")
     parser.add_argument("--api-mode", action="store_true",
                         help="When enabled, output is JSON formatted for API consumption")
+    parser.add_argument("--acknowledge", action="store_true",
+                        help="Acknowledge a step that was waiting for user confirmation")
     args = parser.parse_args()
     
     api_url = args.api_url
@@ -53,6 +123,55 @@ def main():
     
     output = {}
     try:
+        if args.acknowledge:
+            # Acknowledge a step that was waiting for user confirmation
+            if not step_name:
+                error_output = {
+                    "pipeline_id": pipeline_id,
+                    "status": "error",
+                    "message": "Step parameter is required for acknowledgment",
+                    "data": {}
+                }
+                if api_mode_flag:
+                    print(json.dumps(error_output))
+                else:
+                    print("Error: Step parameter is required for acknowledgment")
+                return error_output
+            
+            # Call the acknowledge_step method
+            if api_mode_flag:
+                # When in API mode, capture stdout and return JSON
+                try:
+                    original_stdout = sys.stdout
+                    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+                    result = agent.acknowledge_step(step_name)
+                    
+                    output = {
+                        "pipeline_id": pipeline_id,
+                        "status": result["status"],
+                        "message": result["message"],
+                        "step": step_name
+                    }
+                finally:
+                    if "original_stdout" in locals():
+                        sys.stdout = original_stdout
+                        print(json.dumps(output))
+            else:
+                # Human-readable output
+                result = agent.acknowledge_step(step_name)
+                status_emoji = "✅" if result["status"] == "success" else "❌"
+                print(f"{status_emoji} Step '{step_name}' acknowledgment: {result['status']}")
+                print(f"Message: {result['message']}")
+                
+                output = {
+                    "pipeline_id": pipeline_id,
+                    "status": result["status"],
+                    "message": result["message"],
+                    "step": step_name
+                }
+            
+            return output
+        
         if mode == "full":
             # Run all steps
             if api_mode_flag:

@@ -8,10 +8,11 @@ const BASE_URL = "http://localhost:4000";
 
 // Type definitions for clarity
 export interface Step {
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "waiting_for_acknowledgment";
   message: string;
   updated_at: number;
   data?: any;
+  requires_acknowledgment?: boolean;
 }
 
 export interface Pipeline {

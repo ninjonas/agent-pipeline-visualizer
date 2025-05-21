@@ -12,12 +12,18 @@ import { useStepProgressManager, PipelineData, PipelineStep } from "@/lib/pipeli
 import { COUNTER_KEY } from "@/lib/constants";
 import { useForceUpdate, triggerUpdate, startAutoUpdates } from "@/lib/updateManager";
 import { useGlobalCounter } from "@/lib/counterUtils";
+import { ToastContainer, useToast } from "@/components/Toast";
+import AcknowledgmentModal from "@/components/AcknowledgmentModal";
+import { useAcknowledgmentHistory } from "@/lib/acknowledgmentHistory";
+import AcknowledgmentHistory from "@/components/AcknowledgmentHistory";
+import BatchAcknowledgmentModal from "@/components/BatchAcknowledgmentModal";
 
 interface Step {
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "waiting_for_acknowledgment";
   message: string;
   updated_at: number;
   data?: any;
+  requires_acknowledgment?: boolean;
 }
 
 interface Pipeline {
@@ -34,6 +40,17 @@ export default function AgentPage() {
   const [selectedPipeline, setSelectedPipeline] = useState<string | null>(null);
   const [isExecutingAllSteps, setIsExecutingAllSteps] = useState<boolean>(false);
   const [availableSteps, setAvailableSteps] = useState<string[]>([]);
+  const [isAcknowledging, setIsAcknowledging] = useState<boolean>(false);
+  const [modalOpen, setModalOpen] = useState<boolean>(false);
+  const [selectedStep, setSelectedStep] = useState<string>("");
+  const [batchModalOpen, setBatchModalOpen] = useState<boolean>(false);
+  const [stepsToAcknowledge, setStepsToAcknowledge] = useState<string[]>([]);
+  
+  // Use toast notifications
+  const toast = useToast();
+  
+  // Use acknowledgment history
+  const acknowledgmentHistory = useAcknowledgmentHistory(selectedPipeline || undefined);
 
   // Use the StepProgressManager for tracking execution progress
   const stepManager = useStepProgressManager(selectedPipeline || "", availableSteps);
@@ -211,6 +228,8 @@ export default function AgentPage() {
         return "bg-gray-400";
       case "pending":
         return "bg-gray-300";
+      case "waiting_for_acknowledgment":
+        return "bg-yellow-500";
       default:
         return "bg-gray-300";
     }
@@ -312,9 +331,126 @@ export default function AgentPage() {
     };
   }, [selectedPipeline]);
 
+  // Function to acknowledge a step requiring confirmation
+  const acknowledgeStep = async (stepName: string) => {
+    setSelectedStep(stepName);
+    setModalOpen(true);
+  };
+  
+  // Function to handle the actual acknowledgment with optional comment
+  const handleAcknowledge = async (comment: string) => {
+    if (!selectedPipeline || !selectedStep) return;
+    
+    setIsAcknowledging(true);
+    
+    try {
+      // Call the API endpoint to acknowledge the step with optional comment
+      const response = await api.agent.acknowledgeStep(selectedPipeline, selectedStep, comment);
+      
+      console.log(`Step '${selectedStep}' acknowledged successfully:`, response);
+      
+      // Record in acknowledgment history
+      acknowledgmentHistory.addRecord(selectedStep, selectedPipeline, comment);
+      
+      // Show success toast notification
+      toast.addSuccess(`Step '${selectedStep}' acknowledged successfully`);
+      
+      // Manually update the UI to reflect the change immediately
+      triggerUpdate('pipeline');
+      
+      // Close the modal
+      setModalOpen(false);
+      
+    } catch (error) {
+      console.error(`Error acknowledging step ${selectedStep}:`, error);
+      
+      // Show error toast notification
+      toast.addError(`Failed to acknowledge step: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsAcknowledging(false);
+    }
+  };
+  
+  // Function to handle batch acknowledgment with optional comment
+  const handleBatchAcknowledge = async (comment: string) => {
+    if (!selectedPipeline || stepsToAcknowledge.length === 0) return;
+    
+    setIsAcknowledging(true);
+    
+    try {
+      // Process each step sequentially
+      for (const stepName of stepsToAcknowledge) {
+        // Call the API endpoint to acknowledge the step with optional comment
+        const response = await api.agent.acknowledgeStep(selectedPipeline, stepName, comment);
+        
+        console.log(`Step '${stepName}' acknowledged successfully:`, response);
+        
+        // Record in acknowledgment history
+        acknowledgmentHistory.addRecord(stepName, selectedPipeline, comment);
+      }
+      
+      // Show success toast notification
+      toast.addSuccess(`${stepsToAcknowledge.length} steps acknowledged successfully`);
+      
+      // Manually update the UI to reflect the change immediately
+      triggerUpdate('pipeline');
+      
+      // Close the modal and reset selected steps
+      setBatchModalOpen(false);
+      setStepsToAcknowledge([]);
+      
+    } catch (error) {
+      console.error(`Error acknowledging steps:`, error);
+      
+      // Show error toast notification
+      toast.addError(`Failed to acknowledge steps: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsAcknowledging(false);
+    }
+  };
+  
+  // Get all steps that need acknowledgment
+  const getPendingAcknowledgmentSteps = (): [string, Step][] => {
+    if (!pipelineData?.steps) return [];
+    
+    return Object.entries(pipelineData.steps)
+      .filter(([_, step]) => step.status === "waiting_for_acknowledgment");
+  };
+  
+  // Function to open batch acknowledgment modal if multiple steps need acknowledgment
+  const openBatchAcknowledgment = () => {
+    const pendingSteps = getPendingAcknowledgmentSteps();
+    
+    if (pendingSteps.length > 0) {
+      setStepsToAcknowledge(pendingSteps.map(([stepName]) => stepName));
+      setBatchModalOpen(true);
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold mb-8">Agent Pipeline Visualizer</h1>
+
+      {/* Toast notifications container */}
+      <ToastContainer messages={toast.messages} onClose={toast.removeMessage} />
+      
+      {/* Acknowledgment modal */}
+      <AcknowledgmentModal
+        isOpen={modalOpen}
+        stepName={selectedStep}
+        onClose={() => setModalOpen(false)}
+        onAcknowledge={handleAcknowledge}
+        isLoading={isAcknowledging}
+      />
+      
+      {/* Batch acknowledgment modal */}
+      <BatchAcknowledgmentModal
+        isOpen={batchModalOpen}
+        steps={stepsToAcknowledge}
+        onClose={() => setBatchModalOpen(false)}
+        onAcknowledge={handleBatchAcknowledge}
+        isLoading={isAcknowledging}
+      />
 
       <div className="mb-8">
         <AgentStepExecution
@@ -483,13 +619,33 @@ export default function AgentPage() {
                 <h4 className="font-semibold mb-4 text-gray-900">
                   Pipeline Steps {/* Add update counter inline to force re-renders */}
                   <span className="hidden" key={`force-update-${pipelineForceUpdateKey}`}>{pipelineForceUpdateKey}</span>
+                  
+                  {/* Display hint for steps requiring acknowledgement */}
+                  {getOrderedSteps().some(([_, step]) => step.status === "waiting_for_acknowledgment") && (
+                    <div className="flex items-center mt-2">
+                      <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full flex items-center">
+                        <span className="mr-1">⚠</span> Steps require acknowledgement
+                      </span>
+                      
+                      {/* Show batch acknowledge button if multiple steps need acknowledgment */}
+                      {getPendingAcknowledgmentSteps().length > 1 && (
+                        <button
+                          onClick={openBatchAcknowledgment}
+                          disabled={isAcknowledging}
+                          className="ml-2 bg-yellow-600 text-white py-1 px-3 rounded text-xs hover:bg-yellow-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        >
+                          Batch Acknowledge ({getPendingAcknowledgmentSteps().length})
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </h4>
                 {/* Update counter used to force re-renders */}
                 <div className="space-y-6" key={`steps-wrapper-${pipelineForceUpdateKey}`}>
                   {getOrderedSteps().map(([stepName, step], index) => (
                     <div
                       key={`${stepName}-${step.status || "pending"}-${pipelineForceUpdateKey}`}
-                      className="relative"
+                      className={`relative ${step.status === "waiting_for_acknowledgment" ? "bg-yellow-50 border-l-4 border-yellow-500 pl-2 rounded-l pulse-yellow" : ""}`}
                     >
                       {/* Connecting line */}
                       {index < getOrderedSteps().length - 1 && (
@@ -514,9 +670,11 @@ export default function AgentPage() {
                                 ? "✗"
                                 : step.status === "running"
                                   ? "►"
-                                  : step.status === "pending"
-                                    ? "○"
-                                    : "○"}
+                                  : step.status === "waiting_for_acknowledgment"
+                                    ? "⚠"
+                                    : step.status === "pending"
+                                      ? "○"
+                                      : "○"}
                         </div>
                         <div className="ml-4 flex-1">
                           <div className="flex justify-between">
@@ -539,6 +697,23 @@ export default function AgentPage() {
                           </div>
                           <p className="text-gray-900">{step.message}</p>
 
+                          {/* Display acknowledgement button for steps requiring confirmation */}
+                          {step.status === "waiting_for_acknowledgment" && (
+                            <div className="mt-3">
+                              <button
+                                onClick={() => acknowledgeStep(stepName)}
+                                disabled={isAcknowledging}
+                                className="bg-yellow-600 text-white py-1 px-3 rounded hover:bg-yellow-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm flex items-center"
+                              >
+                                <span className="mr-1">⚠</span>
+                                {isAcknowledging && selectedStep === stepName ? "Acknowledging..." : "Acknowledge and Continue"}
+                              </button>
+                              <p className="text-xs text-yellow-800 mt-1">
+                                This step requires your acknowledgment to continue
+                              </p>
+                            </div>
+                          )}
+
                           {/* Display step data if available */}
                           {step.data && (
                             <div className="mt-2 p-3 bg-gray-900 rounded text-sm text-white">
@@ -560,6 +735,9 @@ export default function AgentPage() {
                   </p>
                 )}
               </div>
+              
+              {/* Display acknowledgment history */}
+              <AcknowledgmentHistory pipelineId={selectedPipeline} className="mt-6" />
             </div>
           ) : (
             <div className="text-gray-900 font-medium">
