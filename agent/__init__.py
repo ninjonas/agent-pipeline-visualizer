@@ -1,2 +1,2 @@
-# This file marks the agent directory as a Python package
-# No need for explicit imports here as module-specific imports will be done in client.py and other modules
+# This file makes the agent directory a Python package
+# It allows importing modules from this directory

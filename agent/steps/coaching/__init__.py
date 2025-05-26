@@ -1,1 +1,3 @@
-# Init file to make this directory a proper Python package
+from agent.steps.coaching.coaching import CoachingStep
+
+__all__ = ["CoachingStep"]

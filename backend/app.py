@@ -1,657 +1,301 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit
 import os
-import logging
-import time
-import uuid
 import json
-from typing import Dict, List, Any
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+import shutil
+from pathlib import Path
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})  # Configure CORS for API routes
-socketio = SocketIO(app, cors_allowed_origins="*")  # Initialize SocketIO with CORS
+CORS(app)
 
-# In-memory storage for pipeline data (would be a database in production)
-pipelines = {}
+# Configuration
+AGENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'agent'))
+CONFIG_FILE = os.path.join(AGENT_DIR, 'config.json')
+STEPS_DIR = os.path.join(AGENT_DIR, 'steps')
 
-# Request logging middleware
-@app.before_request
-def before_request():
-    request.start_time = time.time()
-    logger.info(f"Request: {request.method} {request.path}")
-
-@app.after_request
-def after_request(response):
-    if hasattr(request, 'start_time'):
-        elapsed = time.time() - request.start_time
-        logger.info(f"Response: {response.status_code} - took {elapsed:.2f}s")
-    return response
-
-@app.route('/api/status', methods=['GET'])
-def get_status():
-    return jsonify({
-        'status': 'online',
-        'message': 'Flask API is running successfully'
-    })
-
-@app.route('/api/data', methods=['GET'])
-def get_data():
-    return jsonify({
-        'items': [
-            {'id': 1, 'name': 'Item 1'},
-            {'id': 2, 'name': 'Item 2'},
-            {'id': 3, 'name': 'Item 3'}
-        ]
-    })
-
-# Agent API endpoints
-@app.route('/api/agent/register', methods=['POST'])
-def register_agent_pipeline():
-    """Register a new agent pipeline and return a unique pipeline ID"""
-    data = request.json
-    agent_name = data.get('agent_name', 'unknown')
-    total_steps = data.get('total_steps', 0)
+# Ensure agent directory structure exists
+def ensure_directories():
+    """Ensure all required directories exist"""
+    if not os.path.exists(AGENT_DIR):
+        os.makedirs(AGENT_DIR)
     
-    pipeline_id = str(uuid.uuid4())
+    if not os.path.exists(STEPS_DIR):
+        os.makedirs(STEPS_DIR)
     
-    # Store initial pipeline data
-    pipelines[pipeline_id] = {
-        'id': pipeline_id,
-        'agent_name': agent_name,
-        'created_at': time.time(),
-        'status': 'initialized',
-        'total_steps': total_steps,
-        'completed_steps': 0,
-        'steps': {}
-    }
+    # Create step directories if they don't exist
+    step_dirs = [
+        'data_analysis', 'evaluation_generation', 'create_contribution_goal', 
+        'create_development_item', 'update_contribution_goal', 'update_development_item',
+        'timely_feedback', 'coaching'
+    ]
     
-    logger.info(f"New pipeline registered: {pipeline_id} by agent {agent_name}")
-    
-    # Emit WebSocket event for new pipeline registration
-    socketio.emit('pipeline_registered', {
-        'pipeline_id': pipeline_id,
-        'pipeline_data': pipelines[pipeline_id]
-    })
-    
-    # Also emit an updated pipelines list
-    pipeline_list = []
-    for pid, data in pipelines.items():
-        pipeline_list.append({
-            'id': pid,
-            'agent_name': data.get('agent_name'),
-            'status': data.get('status'),
-            'created_at': data.get('created_at'),
-            'completed_steps': data.get('completed_steps'),
-            'total_steps': data.get('total_steps')
-        })
-    
-    socketio.emit('pipelines_list_updated', {
-        'pipelines': pipeline_list
-    })
-    
-    return jsonify({
-        'pipeline_id': pipeline_id,
-        'status': 'registered'
-    })
-
-@app.route('/api/agent/update', methods=['POST'])
-def update_agent_pipeline():
-    """Update the status of a pipeline step"""
-    data = request.json
-    pipeline_id = data.get('pipeline_id')
-    step = data.get('step')
-    status = data.get('status')
-    message = data.get('message', '')
-    step_data = data.get('data')
-    
-    if not pipeline_id or not step or not status:
-        return jsonify({
-            'error': 'Missing required fields'
-        }), 400
-    
-    if pipeline_id not in pipelines:
-        return jsonify({
-            'error': f'Pipeline ID {pipeline_id} not found'
-        }), 404
-    
-    # Update pipeline step status
-    pipeline = pipelines[pipeline_id]
-    pipeline['steps'][step] = {
-        'status': status,
-        'message': message,
-        'updated_at': time.time()
-    }
-    
-    # Store step data if provided
-    if step_data:
-        pipeline['steps'][step]['data'] = step_data
-    
-    # Update pipeline status
-    step_count = len(pipeline['steps'])
-    completed_steps = sum(1 for s in pipeline['steps'].values() if s.get('status') == 'completed')
-    pipeline['completed_steps'] = completed_steps
-    
-    # Update overall pipeline status
-    if completed_steps == pipeline['total_steps']:
-        pipeline['status'] = 'completed'
-    elif any(s.get('status') == 'failed' for s in pipeline['steps'].values()):
-        pipeline['status'] = 'failed'
-    else:
-        pipeline['status'] = 'in_progress'
-    
-    logger.info(f"Pipeline {pipeline_id} step '{step}' updated: {status}")
-    
-    # Emit WebSocket event with the updated step data
-    socketio.emit('step_updated', {
-        'pipeline_id': pipeline_id,
-        'step': step,
-        'step_data': pipeline['steps'][step],
-        'pipeline_status': pipeline['status'],
-        'completed_steps': completed_steps,
-        'total_steps': pipeline['total_steps']
-    })
-    
-    # Emit full pipeline update for subscribers
-    socketio.emit('pipeline_updated', {
-        'pipeline_id': pipeline_id,
-        'pipeline_data': pipeline
-    })
-    
-    return jsonify({
-        'pipeline_id': pipeline_id,
-        'step': step,
-        'status': 'updated'
-    })
-
-@app.route('/api/agent/status/<pipeline_id>', methods=['GET'])
-def get_agent_pipeline_status(pipeline_id):
-    """Get the current status of a pipeline"""
-    if pipeline_id not in pipelines:
-        return jsonify({
-            'error': f'Pipeline ID {pipeline_id} not found'
-        }), 404
-    
-    return jsonify(pipelines[pipeline_id])
-
-@app.route('/api/agent/pipelines', methods=['GET'])
-def list_agent_pipelines():
-    """List all registered pipelines"""
-    pipeline_list = []
-    
-    for pipeline_id, data in pipelines.items():
-        pipeline_list.append({
-            'id': pipeline_id,
-            'agent_name': data.get('agent_name'),
-            'status': data.get('status'),
-            'created_at': data.get('created_at'),
-            'completed_steps': data.get('completed_steps'),
-            'total_steps': data.get('total_steps')
-        })
-    
-    return jsonify({
-        'pipelines': pipeline_list
-    })
-
-@app.route('/api/agent/execute', methods=['POST'])
-def execute_agent_step():
-    """Execute a specific step in an agent pipeline using the agent's client.py"""
-    data = request.json
-    pipeline_id = data.get('pipeline_id')
-    step = data.get('step')
-
-    if not pipeline_id or not step:
-        return jsonify({
-            'error': 'Missing required fields'
-        }), 400
-
-    if pipeline_id not in pipelines:
-        return jsonify({
-            'error': f'Pipeline ID {pipeline_id} not found'
-        }), 404
-
-    # Mark the step as running
-    pipelines[pipeline_id]['steps'][step] = {
-        'status': 'running',
-        'message': f'Started executing {step}',
-        'updated_at': time.time()
-    }
-    
-    # Emit WebSocket event for step execution start
-    socketio.emit('step_started', {
-        'pipeline_id': pipeline_id,
-        'step': step,
-        'step_data': pipelines[pipeline_id]['steps'][step]
-    })
-
-    try:
-        # Use subprocess to execute the agent's client.py with the step
-        agent_dir = os.path.join(os.path.dirname(__file__), '../agent')
-        client_file = os.path.join(agent_dir, 'client.py')
-
-        if not os.path.exists(client_file):
-            raise FileNotFoundError("Agent client.py not found")
-
-        # Execute the client.py with the step and pipeline ID
-        import subprocess
-        import sys
+    for step in step_dirs:
+        step_path = os.path.join(STEPS_DIR, step)
+        if not os.path.exists(step_path):
+            os.makedirs(step_path)
         
-        # Print debugging information about the Python environment
-        logger.info(f"Using Python executable: {sys.executable}")
-        logger.info(f"Working directory: {agent_dir}")
+        in_dir = os.path.join(step_path, 'in')
+        out_dir = os.path.join(step_path, 'out')
         
-        # Get the parent directory for PYTHONPATH
-        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if not os.path.exists(in_dir):
+            os.makedirs(in_dir)
         
-        # Set a special environment variable to indicate we're running from the API
-        # This helps the agent know to format output appropriately
-        env_vars = dict(os.environ, 
-                    PYTHONPATH=parent_dir, 
-                    AGENT_API_MODE="1",
-                    PYTHONUNBUFFERED="1")  # Disable Python output buffering
-        
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+
+# Load agent configuration
+def load_config():
+    """Load agent configuration from file or create default"""
+    if os.path.exists(CONFIG_FILE):
         try:
-            # Create a unique output file for this run
-            import tempfile
-            temp_output_file = tempfile.NamedTemporaryFile(delete=False, mode='w+')
-            temp_output_path = temp_output_file.name
-            temp_output_file.close()
-            
-            try:
-                # Run the agent with output redirected to our file
-                with open(temp_output_path, 'w') as output_file:
-                    process = subprocess.run(
-                        [sys.executable, client_file, '--mode', 'step', '--step', step, '--pipeline-id', pipeline_id, '--api-mode'],
-                        cwd=agent_dir,
-                        stdout=output_file,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        env=env_vars
-                    )
-                
-                # Read the clean output from file
-                with open(temp_output_path, 'r') as input_file:
-                    clean_stdout = input_file.read()
-                
-                # Create a result object with our clean stdout
-                result = type('CompletedProcess', (), {
-                    'returncode': process.returncode,
-                    'stdout': clean_stdout,
-                    'stderr': process.stderr
-                })
-                
-                # Log details about the execution
-                logger.info(f"Agent subprocess completed with return code: {result.returncode}")
-                logger.info(f"Agent stdout length: {len(result.stdout)} bytes")
-                logger.debug(f"Agent stdout: '{result.stdout}'")
-                
-                if result.stderr:
-                    logger.warning(f"Agent stderr: '{result.stderr}'")
-            finally:
-                # Clean up temp file
-                if os.path.exists(temp_output_path):
-                    os.unlink(temp_output_path)
+            with open(CONFIG_FILE, 'r') as f:
+                return json.load(f)
         except Exception as e:
-            logger.error(f"Error executing subprocess: {e}")
-            raise
+            print(f"Error loading config: {e}")
+    
+    # Default configuration if file doesn't exist
+    default_config = {
+        "steps": [
+            {
+                "id": "data_analysis",
+                "name": "Data Analysis",
+                "description": "Analyze performance data to identify trends and areas for improvement.",
+                "requiresUserInput": True,
+                "dependencies": [],
+                "group": "performance_evaluation"
+            },
+            {
+                "id": "evaluation_generation",
+                "name": "Evaluation Generation",
+                "description": "Generate performance evaluations based on the analysis of data and feedback.",
+                "requiresUserInput": True,
+                "dependencies": ["data_analysis"],
+                "group": "performance_evaluation"
+            },
+            {
+                "id": "create_contribution_goal",
+                "name": "Create Contribution Goal",
+                "description": "Create specific, measurable contribution goals for team members based on performance data.",
+                "requiresUserInput": True,
+                "dependencies": ["evaluation_generation"],
+                "group": "performance_evaluation"
+            },
+            {
+                "id": "create_development_item",
+                "name": "Create Development Item",
+                "description": "Create development items to help team members improve their skills and performance.",
+                "requiresUserInput": True,
+                "dependencies": ["evaluation_generation"],
+                "group": "performance_evaluation"
+            },
+            {
+                "id": "update_contribution_goal",
+                "name": "Update Contribution Goal",
+                "description": "Update contribution goals based on the progress made by team members.",
+                "requiresUserInput": True,
+                "dependencies": ["create_contribution_goal"],
+                "group": "monthly_checkins"
+            },
+            {
+                "id": "update_development_item",
+                "name": "Update Development Item",
+                "description": "Update development items based on the progress made by team members.",
+                "requiresUserInput": True,
+                "dependencies": ["create_development_item"],
+                "group": "monthly_checkins"
+            },
+            {
+                "id": "timely_feedback",
+                "name": "Timely Feedback",
+                "description": "Provide timely feedback to team members based on their performance and progress.",
+                "requiresUserInput": True,
+                "dependencies": ["update_contribution_goal", "update_development_item"],
+                "group": "monthly_checkins"
+            },
+            {
+                "id": "coaching",
+                "name": "Coaching",
+                "description": "Provide coaching and support to team members to help them achieve their goals and improve their performance.",
+                "requiresUserInput": True,
+                "dependencies": ["timely_feedback"],
+                "group": "monthly_checkins"
+            }
+        ],
+        "status": {}
+    }
+    
+    # Save default config
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(default_config, f, indent=2)
+    
+    return default_config
 
-        if result.returncode != 0:
-            logger.error(f"Agent execution failed with return code: {result.returncode}")
-            logger.error(f"Agent stderr: {result.stderr}")
-            raise RuntimeError(f"Agent execution failed: {result.stderr}")
+# Save agent configuration
+def save_config(config):
+    """Save agent configuration to file"""
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
 
-        # Parse the output as JSON - handle potential JSON parsing errors
+# Get step status
+def get_step_status():
+    """Get current status of all steps"""
+    config = load_config()
+    status_file = os.path.join(AGENT_DIR, 'status.json')
+    
+    if os.path.exists(status_file):
         try:
-            # First try direct parsing of the output
-            try:
-                stdout_content = result.stdout.strip()
-                logger.info(f"Raw stdout content length: {len(stdout_content)} bytes")
-                logger.debug(f"Raw stdout content: '{stdout_content}'")
-                
-                if not stdout_content:
-                    raise ValueError("Empty output from agent")
-                
-                # Try to parse the output directly first
-                step_result = json.loads(stdout_content)
-                logger.info("Successfully parsed direct JSON output")
-                
-            except json.JSONDecodeError as direct_error:
-                # If direct parsing fails, try to extract a JSON object from mixed output
-                logger.warning(f"Direct JSON parsing failed: {direct_error}")
-                logger.info(f"Attempting to extract JSON from mixed output: '{stdout_content[:100]}...'")
-                
-                import re
-                
-                # Clean up output - try to find first { and last }
-                first_brace = stdout_content.find('{')
-                last_brace = stdout_content.rfind('}')
-                
-                if first_brace >= 0 and last_brace > first_brace:
-                    # Try to extract what looks like a complete JSON object
-                    potential_json = stdout_content[first_brace:last_brace+1]
-                    try:
-                        step_result = json.loads(potential_json)
-                        logger.info("Successfully extracted clean JSON from output")
-                    except json.JSONDecodeError:
-                        # If that still fails, continue with regex approach
-                        pass
-                
-                # Only continue with regex if we haven't found a valid result yet
-                if 'step_result' not in locals():
-                    # Look for patterns that might be complete JSON objects
-                    json_patterns = [
-                        r'(\{.*\})',  # Any object {...}
-                        r'(\{[^{]*"status"[^}]*\})',  # Object containing "status"
-                        r'(\{[^{]*"message"[^}]*\})'  # Object containing "message"
-                    ]
-                    
-                    for pattern in json_patterns:
-                        json_matches = re.findall(pattern, stdout_content, re.DOTALL)
-                        if json_matches:
-                            logger.info(f"Found {len(json_matches)} potential JSON matches with pattern {pattern}")
-                            
-                            # Try each potential JSON match until one parses correctly
-                            for json_candidate in json_matches:
-                                try:
-                                    candidate_result = json.loads(json_candidate)
-                                    # Check if this is a valid step result with required fields
-                                    if "status" in candidate_result:
-                                        step_result = candidate_result
-                                        logger.info("Found valid JSON object in output")
-                                        break
-                                except json.JSONDecodeError:
-                                    continue
-                            
-                            # If we found a valid result, break out of the pattern loop
-                            if 'step_result' in locals():
-                                break
-                
-                # If we still don't have a valid result
-                if 'step_result' not in locals():
-                    # Try manual approach: Get the entire content, log it, and build our own response
-                    logger.error(f"Could not parse any valid JSON from agent output. Raw content: '{stdout_content}'")
-                    
-                    # Build a fallback response with the raw output
-                    step_result = {
-                        "status": "failed",
-                        "message": "Could not parse JSON output from agent",
-                        "data": {"raw_output": stdout_content}
-                    }
-            
-            # Update the step status
-            pipelines[pipeline_id]['steps'][step] = {
-                'status': step_result.get('status', 'failed'),
-                'message': step_result.get('message', 'No message provided'),
-                'updated_at': time.time(),
-                'data': step_result.get('data', {})  # Always provide at least an empty dict
-            }
-            
-            # Log the extracted data
-            logger.info(f"Data from step result: {json.dumps(step_result.get('data', {}))}")
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing error: {e}")
-            logger.error(f"Raw output: {result.stdout}")
-            
-            # Update with error status
-            pipelines[pipeline_id]['steps'][step] = {
-                'status': 'failed',
-                'message': f"Failed to parse agent output: {e}",
-                'updated_at': time.time(),
-                'data': {'raw_output': result.stdout}
-            }
-
-    except Exception as e:
-        logger.exception(f"Error during agent step execution: {e}")
+            with open(status_file, 'r') as f:
+                status = json.load(f)
+        except Exception as e:
+            print(f"Error loading status: {e}")
+            status = {}
+    else:
+        status = {}
+    
+    steps = []
+    
+    # Combine step configuration with status
+    for step in config['steps']:
+        step_id = step['id']
+        step_status = status.get(step_id, {})
         
-        # Store more detailed error information
-        error_message = str(e)
-        error_type = type(e).__name__
-        
-        pipelines[pipeline_id]['steps'][step] = {
-            'status': 'failed',
-            'message': f"{error_type}: {error_message}",
-            'updated_at': time.time(),
-            'data': {
-                'error_type': error_type,
-                'error_details': error_message
-            }
-        }
+        steps.append({
+            "id": step_id,
+            "name": step["name"],
+            "description": step["description"],
+            "status": step_status.get("status", "pending"),
+            "requiresUserInput": step["requiresUserInput"],
+            "dependencies": step["dependencies"],
+            "group": step.get("group", "")
+        })
+    
+    return steps
 
-    # Update overall pipeline status
-    update_pipeline_status(pipeline_id)
+# Get files for a step
+def get_step_files(step_id):
+    """Get list of files in the step's output directory"""
+    out_dir = os.path.join(STEPS_DIR, step_id, 'out')
+    
+    if not os.path.exists(out_dir):
+        return []
+    
+    files = []
+    for file in os.listdir(out_dir):
+        file_path = os.path.join(out_dir, file)
+        if os.path.isfile(file_path):
+            files.append(file_path)
+    
+    return files
 
-    return jsonify({
-        'pipeline_id': pipeline_id,
-        'step': step,
-        'result': pipelines[pipeline_id]['steps'][step]
-    })
+# API routes
+@app.route('/api/status', methods=['GET'])
+def api_status():
+    """API status endpoint"""
+    return jsonify({"status": "ok"})
+
+@app.route('/api/config', methods=['GET', 'POST'])
+def api_config():
+    """Get or update agent configuration"""
+    if request.method == 'GET':
+        return jsonify(load_config())
+    elif request.method == 'POST':
+        new_config = request.json
+        save_config(new_config)
+        return jsonify({"status": "success"})
 
 @app.route('/api/steps', methods=['GET'])
-def list_steps():
-    """List all available steps from steps_config.json"""
-    config_path = os.path.join(os.path.dirname(__file__), '../agent/steps_config.json')
+def api_steps():
+    """Get all steps with their status"""
+    steps = get_step_status()
+    return jsonify({"steps": steps})
 
-    try:
-        with open(config_path, 'r') as file:
-            config = json.load(file)
-            steps = config.get('steps', [])
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        logger.error(f"Error reading steps_config.json: {e}")
-        return jsonify({
-            'error': 'Failed to load steps configuration',
-            'details': str(e)
-        }), 500
-
-    return jsonify({
-        'steps': steps
-    })
-
-@app.route('/api/agent/acknowledge', methods=['POST'])
-def acknowledge_step():
-    """
-    Acknowledge a step that was waiting for user confirmation.
-    This allows the pipeline to continue execution.
-    """
-    data = request.json
-    pipeline_id = data.get('pipeline_id')
-    step = data.get('step')
-    comment = data.get('comment', '')
+@app.route('/api/steps/<step_id>', methods=['GET'])
+def api_step(step_id):
+    """Get a specific step with its status"""
+    steps = get_step_status()
+    step = next((s for s in steps if s['id'] == step_id), None)
     
-    if not pipeline_id or not step:
-        return jsonify({
-            'error': 'Missing required fields'
-        }), 400
-    
-    if pipeline_id not in pipelines:
-        return jsonify({
-            'error': f'Pipeline ID {pipeline_id} not found'
-        }), 404
-    
-    # Get the current pipeline status
-    pipeline = pipelines[pipeline_id]
-    
-    # Verify step is in waiting_for_acknowledgment state
-    if step not in pipeline['steps'] or pipeline['steps'][step].get('status') != 'waiting_for_acknowledgment':
-        return jsonify({
-            'error': f'Step {step} is not waiting for acknowledgment'
-        }), 400
-    
-    # Execute the acknowledgment using the agent's client.py
-    agent_dir = os.path.join(os.path.dirname(__file__), '../agent')
-    client_file = os.path.join(agent_dir, 'client.py')
-    
-    if not os.path.exists(client_file):
-        return jsonify({
-            'error': 'Agent client.py not found'
-        }), 500
-    
-    # Create a unique output file for this run
-    import tempfile
-    import subprocess
-    temp_output_file = tempfile.NamedTemporaryFile(delete=False, mode='w+')
-    temp_output_path = temp_output_file.name
-    temp_output_file.close()
-    
-    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    env_vars = dict(os.environ, 
-                PYTHONPATH=parent_dir, 
-                AGENT_API_MODE="1",
-                PYTHONUNBUFFERED="1")
-    
-    try:
-        # Run the agent with output redirected to our file
-        with open(temp_output_path, 'w') as output_file:
-            subprocess.run(
-                [sys.executable, client_file, '--acknowledge', '--step', step, '--pipeline-id', pipeline_id, '--api-mode'],
-                cwd=agent_dir,
-                stdout=output_file,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env_vars
-            )
-        
-        # Update pipeline step status
-        pipeline['steps'][step] = {
-            'status': 'completed',
-            'message': f'Step {step} acknowledged by user' + (f': "{comment}"' if comment else ''),
-            'updated_at': time.time()
-        }
-        
-        # Update completed steps counter
-        completed_steps = sum(1 for s in pipeline['steps'].values() if s.get('status') == 'completed')
-        pipeline['completed_steps'] = completed_steps
-        
-        # Emit WebSocket events
-        socketio.emit('step_updated', {
-            'pipeline_id': pipeline_id,
-            'step': step,
-            'step_data': pipeline['steps'][step],
-            'pipeline_status': pipeline['status'],
-            'completed_steps': completed_steps,
-            'total_steps': pipeline['total_steps'],
-            'acknowledgment': True
-        })
-        
-        socketio.emit('pipeline_updated', {
-            'pipeline_id': pipeline_id,
-            'pipeline_data': pipeline
-        })
-        
-        return jsonify({
-            'status': 'success',
-            'message': f'Acknowledged step {step}' + (f' with comment: "{comment}"' if comment else ''),
-            'pipeline_id': pipeline_id,
-            'step': step,
-            'comment': comment if comment else None
-        })
-        
-    except Exception as e:
-        logger.error(f"Error acknowledging step: {e}")
-        return jsonify({
-            'error': f'Error acknowledging step: {str(e)}'
-        }), 500
-    finally:
-        # Clean up temp file
-        if os.path.exists(temp_output_path):
-            os.unlink(temp_output_path)
-
-def update_pipeline_status(pipeline_id):
-    """Update the overall status of a pipeline based on its steps"""
-    if pipeline_id not in pipelines:
-        return
-    
-    pipeline = pipelines[pipeline_id]
-    steps = pipeline.get('steps', {})
-    
-    # Count completed steps
-    completed_steps = sum(1 for s in steps.values() if s.get('status') == 'completed')
-    pipeline['completed_steps'] = completed_steps
-    
-    # Update overall status
-    if completed_steps == pipeline['total_steps']:
-        pipeline['status'] = 'completed'
-    elif any(s.get('status') == 'failed' for s in steps.values()):
-        pipeline['status'] = 'failed'
+    if step:
+        return jsonify(step)
     else:
-        pipeline['status'] = 'in_progress'
+        return jsonify({"error": "Step not found"}), 404
+
+@app.route('/api/steps/<step_id>/files', methods=['GET'])
+def api_step_files(step_id):
+    """Get files for a specific step"""
+    files = get_step_files(step_id)
+    return jsonify({"files": files})
+
+@app.route('/api/steps/<step_id>/approve', methods=['POST'])
+def api_approve_step(step_id):
+    """Approve a step that's waiting for user input"""
+    status_file = os.path.join(AGENT_DIR, 'status.json')
     
-    # Emit WebSocket event with updated pipeline data
-    socketio.emit('pipeline_updated', {
-        'pipeline_id': pipeline_id,
-        'pipeline_data': pipeline
-    })
-       
-# Error handlers
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({'error': 'Not found', 'message': str(error)}), 404
-
-@app.errorhandler(500)
-def server_error(error):
-    return jsonify({'error': 'Server error', 'message': str(error)}), 500
-
-# SocketIO event handlers
-@socketio.on('connect')
-def handle_connect():
-    logger.info(f"Client connected: {request.sid}")
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    logger.info(f"Client disconnected: {request.sid}")
-
-@socketio.on('subscribe_pipeline')
-def handle_subscribe_pipeline(data):
-    pipeline_id = data.get('pipeline_id')
-    logger.info(f"Client {request.sid} subscribed to pipeline {pipeline_id}")
+    if os.path.exists(status_file):
+        with open(status_file, 'r') as f:
+            status = json.load(f)
+    else:
+        status = {}
     
-    if pipeline_id in pipelines:
-        # Immediately send current pipeline data to the client
-        emit('pipeline_updated', {
-            'pipeline_id': pipeline_id,
-            'pipeline_data': pipelines[pipeline_id]
-        })
-
-@socketio.on('subscribe_all_pipelines')
-def handle_subscribe_all_pipelines():
-    logger.info(f"Client {request.sid} subscribed to all pipelines")
-    
-    # Immediately send current pipelines list to the client
-    pipeline_list = []
-    for pipeline_id, data in pipelines.items():
-        pipeline_list.append({
-            'id': pipeline_id,
-            'agent_name': data.get('agent_name'),
-            'status': data.get('status'),
-            'created_at': data.get('created_at'),
-            'completed_steps': data.get('completed_steps'),
-            'total_steps': data.get('total_steps')
-        })
-    
-    emit('pipelines_list_updated', {
-        'pipelines': pipeline_list
-    })
-
-if __name__ == '__main__':
-    import signal
-    import sys
-    
-    # Setup signal handling for graceful shutdown
-    def signal_handler(sig, frame):
-        logger.info("Received termination signal. Shutting down gracefully...")
-        # Clean up any resources if needed
-        sys.exit(0)
+    # Update the step status if it's waiting for user input
+    if step_id in status and status[step_id].get('status') == 'waiting_input':
+        status[step_id]['status'] = 'completed'
         
-    # Register signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+        # Write the approval status to a special file that the agent will check
+        approval_file = os.path.join(STEPS_DIR, step_id, 'out', '.approved')
+        with open(approval_file, 'w') as f:
+            f.write('approved')
+        
+        with open(status_file, 'w') as f:
+            json.dump(status, f, indent=2)
+        
+        return jsonify({"status": "success"})
+    else:
+        return jsonify({"error": "Step not in waiting_input state"}), 400
+
+@app.route('/api/files', methods=['GET', 'POST'])
+def api_files():
+    """Get or update file content"""
+    if request.method == 'GET':
+        file_path = request.args.get('path')
+        
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({"error": "File not found"}), 404
+        
+        try:
+            with open(file_path, 'r') as f:
+                content = f.read()
+            
+            return jsonify({"content": content})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
     
-    port = int(os.environ.get('PORT', 4000))
-    logger.info(f"Starting Flask-SocketIO server on port {port}")
-    socketio.run(app, debug=True, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
+    elif request.method == 'POST':
+        data = request.json
+        file_path = data.get('path')
+        content = data.get('content')
+        
+        if not file_path:
+            return jsonify({"error": "No file path provided"}), 400
+        
+        try:
+            # Ensure parent directory exists
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            
+            with open(file_path, 'w') as f:
+                f.write(content)
+            
+            return jsonify({"status": "success"})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+# Start the server
+if __name__ == '__main__':
+    # Ensure directories exist
+    ensure_directories()
+    
+    # Create default config if it doesn't exist
+    if not os.path.exists(CONFIG_FILE):
+        load_config()
+    
+    app.run(host='0.0.0.0', port=4000, debug=True)

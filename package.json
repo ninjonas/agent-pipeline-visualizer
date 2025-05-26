@@ -1,0 +1,13 @@
+{
+  "name": "agent-pipeline-visualizer",
+  "version": "1.0.0",
+  "description": "A framework for visualizing AI agent actions when processing data",
+  "scripts": {
+    "start": "./run.sh dev",
+    "build": "./run.sh build",
+    "agent": "./run.sh agent-run step",
+    "full": "./run.sh full"
+  },
+  "author": "",
+  "license": "MIT"
+}

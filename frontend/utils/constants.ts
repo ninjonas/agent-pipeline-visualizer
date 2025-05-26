@@ -1,0 +1,82 @@
+// Agent step groups
+export const STEP_GROUPS = [
+  {
+    id: 'performance_evaluation',
+    name: 'Performance Evaluation',
+  },
+  {
+    id: 'monthly_checkins',
+    name: 'Monthly Check-ins',
+  },
+];
+
+// Agent steps configuration
+export const AGENT_STEPS = [
+  // Performance Evaluation steps
+  {
+    id: 'data_analysis',
+    name: 'Data Analysis',
+    description: 'Analyze performance data to identify trends and areas for improvement.',
+    requiresUserInput: true,
+    dependencies: [],
+    group: 'performance_evaluation',
+  },
+  {
+    id: 'evaluation_generation',
+    name: 'Evaluation Generation',
+    description: 'Generate performance evaluations based on the analysis of data and feedback.',
+    requiresUserInput: true,
+    dependencies: ['data_analysis'],
+    group: 'performance_evaluation',
+  },
+  {
+    id: 'create_contribution_goal',
+    name: 'Create Contribution Goal',
+    description: 'Create specific, measurable contribution goals for team members based on performance data.',
+    requiresUserInput: true,
+    dependencies: ['evaluation_generation'],
+    group: 'performance_evaluation',
+  },
+  {
+    id: 'create_development_item',
+    name: 'Create Development Item',
+    description: 'Create development items to help team members improve their skills and performance.',
+    requiresUserInput: true,
+    dependencies: ['evaluation_generation'],
+    group: 'performance_evaluation',
+  },
+  
+  // Monthly Check-ins steps
+  {
+    id: 'update_contribution_goal',
+    name: 'Update Contribution Goal',
+    description: 'Update contribution goals based on the progress made by team members.',
+    requiresUserInput: true,
+    dependencies: ['create_contribution_goal'],
+    group: 'monthly_checkins',
+  },
+  {
+    id: 'update_development_item',
+    name: 'Update Development Item',
+    description: 'Update development items based on the progress made by team members.',
+    requiresUserInput: true,
+    dependencies: ['create_development_item'],
+    group: 'monthly_checkins',
+  },
+  {
+    id: 'timely_feedback',
+    name: 'Timely Feedback',
+    description: 'Provide timely feedback to team members based on their performance and progress.',
+    requiresUserInput: true,
+    dependencies: ['update_contribution_goal', 'update_development_item'],
+    group: 'monthly_checkins',
+  },
+  {
+    id: 'coaching',
+    name: 'Coaching',
+    description: 'Provide coaching and support to team members to help them achieve their goals and improve their performance.',
+    requiresUserInput: true,
+    dependencies: ['timely_feedback'],
+    group: 'monthly_checkins',
+  },
+];

@@ -1,1 +1,3 @@
-# Init file to make this directory a proper Python package
+from agent.steps.evaluation_generation.evaluation_generation import EvaluationGenerationStep
+
+__all__ = ["EvaluationGenerationStep"]
