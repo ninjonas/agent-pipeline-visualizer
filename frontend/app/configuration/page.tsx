@@ -3,13 +3,14 @@
 import { useState, useEffect } from 'react';
 import { ConfigEditor } from '@/components/ConfigEditor';
 import { AGENT_STEPS, STEP_GROUPS } from '@/utils/constants';
+import { useToast } from '@/contexts/ToastContext';
 
 export default function ConfigurationPage() {
   const [config, setConfig] = useState({
     steps: AGENT_STEPS
   });
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const { addToast } = useToast();
 
   useEffect(() => {
     fetchConfig();
@@ -25,6 +26,7 @@ export default function ConfigurationPage() {
       }
     } catch (error) {
       console.error('Error fetching config:', error);
+      addToast('Failed to fetch configuration', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -42,16 +44,13 @@ export default function ConfigurationPage() {
       });
       
       if (response.ok) {
-        setMessage({ type: 'success', text: 'Configuration saved successfully' });
-        setTimeout(() => setMessage(null), 3000);
+        addToast('Configuration saved successfully', 'success');
       } else {
-        setMessage({ type: 'error', text: 'Failed to save configuration' });
-        setTimeout(() => setMessage(null), 3000);
+        addToast('Failed to save configuration', 'error');
       }
     } catch (error) {
       console.error('Error saving config:', error);
-      setMessage({ type: 'error', text: 'Error saving configuration' });
-      setTimeout(() => setMessage(null), 3000);
+      addToast('Error saving configuration', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -60,12 +59,6 @@ export default function ConfigurationPage() {
   return (
     <div className="container mx-auto py-6">
       <h1 className="text-3xl font-bold mb-6 text-primary-700">Agent Configuration</h1>
-      
-      {message && (
-        <div className={`mb-6 p-4 rounded-md ${message.type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-          {message.text}
-        </div>
-      )}
       
       <div className="bg-white rounded-lg shadow-sm p-6">
         <div className="mb-6">

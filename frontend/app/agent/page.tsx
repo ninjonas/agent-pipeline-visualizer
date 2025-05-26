@@ -7,11 +7,13 @@ import { AgentStatus } from '@/components/AgentStatus';
 import { useAgentSteps } from '@/utils/hooks/useAgentSteps';
 import { AGENT_STEPS, STEP_GROUPS } from '@/utils/constants';
 import { Step } from '@/types/agent';
+import { useToast } from '@/contexts/ToastContext';
 
 export default function AgentDashboard() {
   const { steps, loading, error, refreshSteps, updateStepOutput } = useAgentSteps();
   const [selectedStep, setSelectedStep] = useState<Step | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const { addToast } = useToast();
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -37,12 +39,46 @@ export default function AgentDashboard() {
       });
       
       if (response.ok) {
-        refreshSteps();
+        const stepName = AGENT_STEPS.find(s => s.id === stepId)?.name || stepId;
+        addToast(`Step "${stepName}" approved successfully`, 'success');
+        
+        // Refresh steps to get the latest status
+        await refreshSteps();
+        
+        // Find and select the next available step
+        const currentStepIndex = AGENT_STEPS.findIndex(s => s.id === stepId);
+        if (currentStepIndex >= 0 && currentStepIndex < AGENT_STEPS.length - 1) {
+          // Look for the next step that's ready to run
+          for (let i = currentStepIndex + 1; i < AGENT_STEPS.length; i++) {
+            const nextStep = AGENT_STEPS[i];
+            const nextStepData = steps.find(s => s.id === nextStep.id);
+            
+            // Check if the next step is ready to run (either waiting for input or in_progress)
+            if (nextStepData && 
+                (nextStepData.status === 'waiting_input' || 
+                 nextStepData.status === 'in_progress')) {
+              // Select this step
+              const stepToSelect = {
+                ...nextStepData,
+                name: nextStep.name,
+                description: nextStep.description,
+                requiresUserInput: nextStep.requiresUserInput,
+                dependencies: nextStep.dependencies,
+              };
+              setSelectedStep(stepToSelect);
+              setSelectedFile(null);
+              addToast(`Moved to next step: ${nextStep.name}`, 'info');
+              break;
+            }
+          }
+        }
       } else {
+        addToast(`Failed to approve step`, 'error');
         console.error('Failed to approve step');
       }
     } catch (error) {
       console.error('Error approving step:', error);
+      addToast(`Error approving step: ${error}`, 'error');
     }
   };
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useToast } from '@/contexts/ToastContext';
 
 interface FileViewerProps {
   stepId: string;
@@ -14,6 +15,7 @@ export function FileViewer({ stepId, selectedFile, onFileSelect, onSaveContent }
   const [editableContent, setEditableContent] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const { addToast } = useToast();
   
   useEffect(() => {
     if (stepId) {
@@ -37,9 +39,12 @@ export function FileViewer({ stepId, selectedFile, onFileSelect, onSaveContent }
       if (response.ok) {
         const data = await response.json();
         setFiles(data.files || []);
+      } else {
+        addToast('Failed to fetch step files', 'error');
       }
     } catch (error) {
       console.error('Error fetching step files:', error);
+      addToast('Error fetching step files', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -55,9 +60,12 @@ export function FileViewer({ stepId, selectedFile, onFileSelect, onSaveContent }
         const data = await response.json();
         setFileContent(data.content || '');
         setEditableContent(data.content || '');
+      } else {
+        addToast('Failed to fetch file content', 'error');
       }
     } catch (error) {
       console.error('Error fetching file content:', error);
+      addToast('Error fetching file content', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -72,10 +80,12 @@ export function FileViewer({ stepId, selectedFile, onFileSelect, onSaveContent }
     if (success) {
       setFileContent(editableContent);
       setSaveStatus('success');
+      addToast(`Successfully updated ${selectedFile.split('/').pop()}`, 'success');
       setTimeout(() => setSaveStatus('idle'), 2000);
       setIsEditing(false);
     } else {
       setSaveStatus('error');
+      addToast(`Failed to update ${selectedFile.split('/').pop()}`, 'error');
       setTimeout(() => setSaveStatus('idle'), 3000);
     }
   };

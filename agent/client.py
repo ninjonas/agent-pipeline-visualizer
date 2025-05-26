@@ -6,6 +6,9 @@ import time
 import argparse
 import importlib
 from typing import Dict, List, Optional, Any, Union
+
+# Add the parent directory to sys.path to resolve imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agent.agent_base import AgentBase
 
 class Agent(AgentBase):

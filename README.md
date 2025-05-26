@@ -55,6 +55,9 @@ The project includes a comprehensive `run.sh` script to manage all components:
 # Kill any processes on ports 3000 and 4000
 ./run.sh kill
 
+# Reset all agent steps and clear outputs
+./reset.sh
+
 # Show help information
 ./run.sh help
 ```

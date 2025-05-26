@@ -163,7 +163,6 @@ run_agent() {
   setup_agent
   
   # Check if the backend is running
-  echo -e "${YELLOW}Checking if backend API is available...${NC}"
   if ! curl -s "$api_url/api/status" > /dev/null; then
     echo -e "${RED}Warning: Backend API is not accessible at $api_url${NC}"
     echo -e "${YELLOW}The agent will run in offline mode and won't connect to the visualizer.${NC}"
@@ -208,7 +207,7 @@ if [ "$1" == "dev" ]; then
   echo -e "  ${YELLOW}./run.sh agent-run step${NC}"
   
   # Trap to catch Ctrl+C and kill both processes
-  trap 'echo -e "${YELLOW}Gracefully shutting down servers...${NC}"; kill -TERM $FRONTEND_PID $BACKEND_PID 2>/dev/null; sleep 1; if ps -p $BACKEND_PID > /dev/null; then kill -9 $BACKEND_PID 2>/dev/null; fi; echo -e "${RED}Servers stopped.${NC}"; exit 0' INT TERM
+  trap 'echo -e "${YELLOW}Gracefully shutting down servers...${NC}"; kill -TERM $FRONTEND_PID $BACKEND_PID 2>/dev/null; sleep 1; if ps -p $BACKEND_PID > /dev/null; then kill -9 $BACKEND_PID 2>/dev/null; fi; if ps -p $FRONTEND_PID > /dev/null; then kill -9 $FRONTEND_PID 2>/dev/null; fi; echo -e "${RED}Servers stopped.${NC}"; exit 0' INT TERM
   # Wait for both processes to finish
   wait
   
@@ -230,8 +229,30 @@ elif [ "$1" == "agent-run" ]; then
   mode=${2:-"step"}  # Default to step mode if not specified
   step=$3
   
-  # Make sure backend port is free when connecting to it
-  kill_port 4000
+  # Check if the backend is running
+  BACKEND_RUNNING=false
+  if curl -s "http://localhost:4000/api/status" > /dev/null; then
+    BACKEND_RUNNING=true
+  fi
+  
+  # If the backend is not running and mode is 'step', start dev mode first
+  if [ "$mode" == "step" ] && [ "$BACKEND_RUNNING" = false ]; then
+    echo -e "${YELLOW}Backend not detected. Starting servers in dev mode first...${NC}"
+    # Start the dev servers in the background
+    $0 dev &
+    DEV_PID=$!
+    
+    # Wait for servers to be ready
+    echo -e "${YELLOW}Waiting for servers to start...${NC}"
+    while ! curl -s "http://localhost:4000/api/status" > /dev/null; do
+      sleep 1
+    done
+    echo -e "${GREEN}Servers are now running.${NC}"
+    sleep 2  # Give a moment for everything to initialize
+  elif [ "$BACKEND_RUNNING" = false ]; then
+    # For non-step modes, just make sure the port is free
+    kill_port 4000
+  fi
   
   run_agent "$mode" "$step"
   
@@ -255,7 +276,7 @@ elif [ "$1" == "full" ]; then
   echo -e "  ${YELLOW}./run.sh agent-run step${NC} (in a new terminal)"
   
   # Trap to catch Ctrl+C and kill both processes
-  trap 'echo -e "${YELLOW}Gracefully shutting down servers...${NC}"; kill -TERM $FRONTEND_PID $BACKEND_PID 2>/dev/null; sleep 1; if ps -p $BACKEND_PID > /dev/null; then kill -9 $BACKEND_PID 2>/dev/null; fi; echo -e "${RED}Servers stopped.${NC}"; exit 0' INT TERM
+  trap 'echo -e "${YELLOW}Gracefully shutting down servers...${NC}"; kill -TERM $FRONTEND_PID $BACKEND_PID 2>/dev/null; sleep 1; if ps -p $BACKEND_PID > /dev/null; then kill -9 $BACKEND_PID 2>/dev/null; fi; if ps -p $FRONTEND_PID > /dev/null; then kill -9 $FRONTEND_PID 2>/dev/null; fi; echo -e "${RED}Servers stopped.${NC}"; exit 0' INT TERM
   # Wait for both processes to finish
   wait
   
@@ -285,6 +306,7 @@ elif [ "$1" == "help" ] || [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
   echo -e "  ${YELLOW}./run.sh agent-run${NC}   - Run agent in interactive step-by-step mode"
   echo -e "  ${YELLOW}./run.sh agent-run full${NC} - Run the complete agent pipeline"
   echo -e "  ${YELLOW}./run.sh agent-run step data_collection${NC} - Run a specific agent step"
+  echo -e "  ${YELLOW}./reset.sh${NC}           - Reset all agent steps and clear outputs"
   
   echo -e "\n${GREEN}Example Workflow:${NC}"
   echo -e "  1. Start the servers:    ${YELLOW}./run.sh dev${NC}"
