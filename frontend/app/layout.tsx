@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import Link from 'next/link';
 import { ToastProvider } from '@/contexts/ToastContext';
+import { ToastToggle } from '@/components/ToastToggle';
 
 export const metadata: Metadata = {
   title: 'Agent Pipeline Visualizer',
@@ -23,20 +24,23 @@ export default function RootLayout({
                 <Link href="/" className="text-xl font-bold text-primary-700">
                   Agent Pipeline Visualizer
                 </Link>
-                <nav>
-                  <ul className="flex space-x-6">
-                    <li>
-                      <Link href="/agent" className="text-gray-600 hover:text-primary-600">
-                        Agent Dashboard
-                      </Link>
-                    </li>
-                    <li>
-                      <Link href="/configuration" className="text-gray-600 hover:text-primary-600">
-                        Configuration
-                      </Link>
-                    </li>
-                  </ul>
-                </nav>
+                <div className="flex items-center space-x-6">
+                  <nav>
+                    <ul className="flex space-x-6">
+                      <li>
+                        <Link href="/agent" className="text-gray-600 hover:text-primary-600">
+                          Agent Dashboard
+                        </Link>
+                      </li>
+                      <li>
+                        <Link href="/configuration" className="text-gray-600 hover:text-primary-600">
+                          Configuration
+                        </Link>
+                      </li>
+                    </ul>
+                  </nav>
+                  <ToastToggle />
+                </div>
               </div>
             </div>
           </header>

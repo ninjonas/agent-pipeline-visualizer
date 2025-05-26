@@ -42,8 +42,14 @@ export function Toast({ message, type, onClose, duration = 3000 }: ToastProps) {
   };
 
   return (
-    <div className={`${isExiting ? 'animate-fade-out-down' : 'animate-fade-in-up'}`}>
-      <div className={`flex items-center p-4 mb-4 rounded-lg border ${bgColor} max-w-md shadow-md`} role="alert">
+    <div 
+      style={{ 
+        animation: isExiting ? 'fadeOutDown 0.3s ease-out' : 'fadeInUp 0.3s ease-out',
+        maxWidth: '28rem', // max-w-md equivalent
+        width: '100%'
+      }}
+    >
+      <div className={`flex items-center p-4 rounded-lg border ${bgColor} shadow-lg`}>
         <div className="inline-flex items-center justify-center flex-shrink-0 w-8 h-8 mr-3">
           {iconMap[type]}
         </div>
