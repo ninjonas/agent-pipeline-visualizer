@@ -225,12 +225,10 @@ export default function AgentDashboard() {
 
   return (
     <div className="container mx-auto py-6">
-      <h1 className="text-3xl font-bold mb-6 text-primary-700">Agent Dashboard</h1>
-      
       <AgentStatus steps={agentStepsState} loading={agentStepsLoading} /> 
       
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
-        <div className="lg:col-span-1 space-y-6 overflow-y-auto max-h-[calc(100vh-12rem)]">
+        <div className="lg:col-span-1 space-y-6">
           {stepGroups.map((group) => ( // Use derived stepGroups
             <div key={group.id} className="bg-white rounded-lg shadow-sm p-4">
               <h2 className="text-xl font-semibold mb-3 text-primary-600">{group.name}</h2>

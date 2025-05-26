@@ -26,11 +26,6 @@ export default function RootLayout({
                 <nav>
                   <ul className="flex space-x-6">
                     <li>
-                      <Link href="/" className="text-gray-600 hover:text-primary-600">
-                        Home
-                      </Link>
-                    </li>
-                    <li>
                       <Link href="/agent" className="text-gray-600 hover:text-primary-600">
                         Agent Dashboard
                       </Link>

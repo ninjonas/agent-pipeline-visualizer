@@ -97,8 +97,6 @@ export default function ConfigurationPage() {
 
   return (
     <div className="container mx-auto py-6">
-      <h1 className="text-3xl font-bold mb-6 text-primary-700">Agent Configuration</h1>
-      
       <div className="bg-white rounded-lg shadow-sm p-6">
         <div className="mb-6">
           <h2 className="text-xl font-semibold mb-2 text-primary-600">Configure Agent Steps</h2>
