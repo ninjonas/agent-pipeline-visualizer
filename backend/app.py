@@ -2,9 +2,11 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 import os
 import json
+import sys
+import time # Added for potential use, not strictly in this change
 import shutil
-from pathlib import Path
 from loguru import logger
+import threading # Added for locking
 
 # Configure Loguru logger
 # Ensure the log directory exists relative to this script's location
@@ -17,11 +19,20 @@ app = Flask(__name__)
 CORS(app)
 
 # Configuration
-AGENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'agent'))
-CONFIG_FILE = os.path.join(AGENT_DIR, 'config.json')
-STEPS_DIR = os.path.join(AGENT_DIR, 'steps')
+# AGENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'agent'))
+# STEPS_DIR = os.path.join(AGENT_DIR, 'steps')
+# CONFIG_FILE = os.path.join(AGENT_DIR, 'config.json')
 
-# Ensure agent directory structure exists
+# Ensure AGENT_DIR and other paths are correctly defined relative to this script
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+AGENT_DIR = os.path.abspath(os.path.join(BASE_DIR, '..', 'agent'))
+STEPS_DIR = os.path.join(AGENT_DIR, 'steps')
+CONFIG_FILE = os.path.join(AGENT_DIR, 'config.json')
+
+# Global lock for status.json operations
+status_json_lock = threading.Lock()
+
+# Ensure necessary directories exist
 def ensure_directories():
     """Ensure all required directories exist"""
     if not os.path.exists(AGENT_DIR):
@@ -139,10 +150,10 @@ def load_config():
     return default_config
 
 # Save agent configuration
-def save_config(config):
+def save_config(config_data):
     """Save agent configuration to file"""
     with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=2)
+        json.dump(config_data, f, indent=2)
 
 # Get step status
 def get_step_status():
@@ -196,6 +207,57 @@ def get_step_files(step_id):
     
     return files
 
+# Helper function for atomic Read-Modify-Write on status.json
+def _update_status_json_locked(step_id_to_update, new_status_value, is_approval=False, requires_user_input_val=None):
+    """
+    Reads, modifies, and writes status.json under a lock.
+    If is_approval is True, it also creates the .approved file.
+    If requires_user_input_val is not None, it updates the requiresUserInput field.
+    Returns True on success, False on failure (e.g., approval for non-waiting_input step).
+    """
+    status_file = os.path.join(AGENT_DIR, 'status.json')
+    current_status_data = {}
+    
+    try:
+        if os.path.exists(status_file):
+            with open(status_file, 'r') as f:
+                content = f.read()
+                if content.strip():
+                    try:
+                        current_status_data = json.loads(content)
+                    except json.JSONDecodeError as jde:
+                        logger.error(f"Error decoding status.json: {jde}. Initializing to empty for update.")
+                        current_status_data = {}
+        
+        step_data = current_status_data.get(step_id_to_update, {})
+
+        if is_approval:
+            if step_data.get('status') != 'waiting_input':
+                logger.warning(f"Attempted to approve step {step_id_to_update} but its status was {step_data.get('status')}, not 'waiting_input'.")
+                return False # Indicate failure: condition for approval not met
+
+        # Update status
+        step_data['status'] = new_status_value
+        
+        # Optionally update requiresUserInput
+        if requires_user_input_val is not None:
+            step_data['requiresUserInput'] = requires_user_input_val
+
+        current_status_data[step_id_to_update] = step_data
+        
+        with open(status_file, 'w') as f:
+            json.dump(current_status_data, f, indent=2)
+        
+        if is_approval: # Create .approved file only on successful approval status update
+            approval_file = os.path.join(STEPS_DIR, step_id_to_update, 'out', '.approved')
+            os.makedirs(os.path.dirname(approval_file), exist_ok=True) # Ensure out dir exists
+            with open(approval_file, 'w') as f:
+                f.write('approved')
+        return True # Indicate success
+    except Exception as e:
+        logger.error(f"Error during locked update of status.json for {step_id_to_update}: {e}")
+        return False # Indicate failure due to exception
+
 # API routes
 @app.route('/api/status', methods=['GET'])
 def api_status():
@@ -209,25 +271,35 @@ def api_config():
         return jsonify(load_config())
     elif request.method == 'POST':
         new_config = request.json
-        save_config(new_config)
+        save_config(new_config) # Saves to config.json
 
-        # Update status.json with requiresUserInput from new_config
-        status_file = os.path.join(AGENT_DIR, 'status.json')
-        if os.path.exists(status_file):
-            with open(status_file, 'r') as f:
-                status_data = json.load(f)
-        else:
-            status_data = {}
-
-        for step_config in new_config.get('steps', []):
-            step_id = step_config.get('id')
-            if step_id:
-                if step_id not in status_data:
-                    status_data[step_id] = {}
-                status_data[step_id]['requiresUserInput'] = step_config.get('requiresUserInput', False)
-        
-        with open(status_file, 'w') as f:
-            json.dump(status_data, f, indent=2)
+        # Update status.json with requiresUserInput from new_config for all steps
+        # This needs to be done carefully to preserve existing statuses.
+        with status_json_lock:
+            status_file = os.path.join(AGENT_DIR, 'status.json')
+            current_status_data = {}
+            if os.path.exists(status_file):
+                with open(status_file, 'r') as f:
+                    content = f.read()
+                    if content.strip():
+                        try:
+                            current_status_data = json.loads(content)
+                        except json.JSONDecodeError as jde:
+                            logger.error(f"Error decoding status.json in api_config: {jde}. Initializing.")
+                            current_status_data = {}
+            
+            for step_config_item in new_config.get('steps', []):
+                step_id = step_config_item.get('id')
+                if step_id:
+                    step_data = current_status_data.get(step_id, {})
+                    step_data['requiresUserInput'] = step_config_item.get('requiresUserInput', False)
+                    # Preserve existing status if any, otherwise it will default to pending later
+                    if 'status' not in step_data:
+                        step_data['status'] = 'pending' # Default new steps to pending
+                    current_status_data[step_id] = step_data
+            
+            with open(status_file, 'w') as f:
+                json.dump(current_status_data, f, indent=2)
             
         return jsonify({"status": "success"})
 
@@ -240,9 +312,9 @@ def api_steps():
 @app.route('/api/steps/<step_id>', methods=['GET', 'POST']) # Allow POST
 def api_step(step_id):
     if request.method == 'GET':
-        steps = get_step_status()
+        # ... (GET logic remains the same, no locking needed for read-only if careful)
+        steps = get_step_status() # get_step_status reads status.json, could be locked if very sensitive
         step = next((s for s in steps if s['id'] == step_id), None)
-        
         if step:
             return jsonify(step)
         else:
@@ -251,48 +323,17 @@ def api_step(step_id):
     elif request.method == 'POST': # Handle POST from agent
         data = request.json
         new_status = data.get('status')
-        # message = data.get('message') # Optional: if agent sends a message
-
         if not new_status:
             logger.error(f"Received POST to /api/steps/{step_id} without status in JSON body.")
             return jsonify({"error": "Missing status in request"}), 400
 
-        status_file = os.path.join(AGENT_DIR, 'status.json')
-        
-        try:
-            current_status_data: dict = {}
-            if os.path.exists(status_file):
-                with open(status_file, 'r') as f:
-                    # Ensure we handle empty or invalid JSON gracefully
-                    try:
-                        content = f.read()
-                        if content.strip(): # Check if file is not empty
-                            current_status_data = json.loads(content)
-                        else:
-                            logger.warning("status.json was empty. Initializing.") # Corrected: Removed f-string
-                    except json.JSONDecodeError as jde:
-                        logger.error(f"Error decoding status.json: {jde}. Re-initializing status.")
-                        current_status_data = {} # Reset if malformed
-            
-            if step_id not in current_status_data:
-                current_status_data[step_id] = {}
-            
-            current_status_data[step_id]['status'] = new_status
-            # if message: # If handling messages
-            #     current_status_data[step_id]['message'] = message
-            # else:
-            #     current_status_data[step_id].pop('message', None)
-
-            with open(status_file, 'w') as f:
-                json.dump(current_status_data, f, indent=2)
-            
-            logger.info(f"Status for step '{step_id}' updated to '{new_status}' by agent POST notification.")
-            # TODO: Consider WebSocket push here for real-time UI update without polling
-            return jsonify({"status": "success", "message": f"Status for {step_id} updated to {new_status}"})
-
-        except Exception as e:
-            logger.error(f"Error updating status for step '{step_id}' via agent POST notification: {e}")
-            return jsonify({"error": f"Failed to update status: {str(e)}"}), 500
+        with status_json_lock: # Acquire lock before calling helper
+            if _update_status_json_locked(step_id, new_status):
+                logger.info(f"Status for step '{step_id}' updated to '{new_status}' by agent POST notification.")
+                return jsonify({"status": "success", "message": f"Status for {step_id} updated to {new_status}"})
+            else:
+                logger.error(f"Failed to update status for step '{step_id}' via agent POST notification (locked operation failed).")
+                return jsonify({"error": "Failed to update status"}), 500
 
 @app.route('/api/steps/<step_id>/files', methods=['GET'])
 def api_step_files(step_id):
@@ -302,30 +343,36 @@ def api_step_files(step_id):
 
 @app.route('/api/steps/<step_id>/approve', methods=['POST'])
 def api_approve_step(step_id):
-    """Approve a step that's waiting for user input"""
-    status_file = os.path.join(AGENT_DIR, 'status.json')
-    
-    if os.path.exists(status_file):
-        with open(status_file, 'r') as f:
-            status = json.load(f)
-    else:
-        status = {}
-    
-    # Update the step status if it's waiting for user input
-    if step_id in status and status[step_id].get('status') == 'waiting_input':
-        status[step_id]['status'] = 'completed'
-        
-        # Write the approval status to a special file that the agent will check
-        approval_file = os.path.join(STEPS_DIR, step_id, 'out', '.approved')
-        with open(approval_file, 'w') as f:
-            f.write('approved')
-        
-        with open(status_file, 'w') as f:
-            json.dump(status, f, indent=2)
-        
-        return jsonify({"status": "success"})
-    else:
-        return jsonify({"error": "Step not in waiting_input state"}), 400
+    with status_json_lock: # Acquire lock
+        status_file = os.path.join(AGENT_DIR, 'status.json')
+        current_status_data = {}
+        try:
+            if os.path.exists(status_file):
+                with open(status_file, 'r') as f:
+                    content = f.read()
+                    if content.strip():
+                        try:
+                            current_status_data = json.loads(content)
+                        except json.JSONDecodeError as jde:
+                            logger.error(f"Error decoding status.json in api_approve_step for {step_id}: {jde}. Assuming empty.")
+                            current_status_data = {}
+            
+            step_data = current_status_data.get(step_id, {})
+            if step_data.get('status') == 'waiting_input':
+                # Create .approved file to signal the agent
+                approval_file = os.path.join(STEPS_DIR, step_id, 'out', '.approved')
+                os.makedirs(os.path.dirname(approval_file), exist_ok=True) # Ensure out dir exists
+                with open(approval_file, 'w') as f:
+                    f.write('approved')
+                logger.info(f"Approval signal file created for step {step_id}. Status remains '{step_data.get('status')}' until agent confirms completion.")
+                return jsonify({"status": "success", "message": f"Approval signaled for step {step_id}. Agent will confirm completion."})
+            else:
+                actual_status = step_data.get('status', 'not found')
+                logger.warning(f"Attempted to approve step {step_id} but its status was '{actual_status}', not 'waiting_input'.")
+                return jsonify({"error": f"Step {step_id} is not awaiting input. Current status: {actual_status}"}), 400
+        except Exception as e:
+            logger.error(f"Error in api_approve_step for {step_id}: {e}")
+            return jsonify({"error": "Failed to process approval due to a server error"}), 500
 
 @app.route('/api/steps/<step_id>/run', methods=['POST'])
 def api_run_step(step_id):
@@ -429,10 +476,11 @@ def api_reset():
     try:
         # Reset status
         status_file = os.path.join(AGENT_DIR, 'status.json')
-        with open(status_file, 'w') as f:
-            json.dump({}, f)
+        with status_json_lock: # Acquire lock
+            with open(status_file, 'w') as f:
+                json.dump({}, f)
         
-        # Clear output files for all steps
+        # Clear output files for all steps (no lock needed for these distinct files)
         step_dirs = [
             'data_analysis', 'evaluation_generation', 'create_contribution_goal', 
             'create_development_item', 'update_contribution_goal', 'update_development_item',

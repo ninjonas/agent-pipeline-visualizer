@@ -48,3 +48,5 @@ out/
 
 # Project specific
 agent/steps/*/out/
+
+*.log

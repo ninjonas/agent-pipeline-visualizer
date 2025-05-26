@@ -44,54 +44,52 @@ export default function AgentDashboard() {
       });
 
       if (response.ok) {
-        const stepConfig = AGENT_STEPS.find(s => s.id === stepId);
-        const stepName = stepConfig?.name || stepId;
-        addToast(`Step "${stepName}" approved successfully. Checking for dependent steps.`, 'success');
+        const stepConfigForToast = AGENT_STEPS.find(s => s.id === stepId);
+        const stepNameForToast = stepConfigForToast?.name || stepId;
+        addToast(`Step "${stepNameForToast}" approval signaled. Waiting for agent confirmation...`, 'info');
 
-        let currentStepsState = await refreshSteps(); // Ensure we have the latest state after approval
+        let currentStepsState = steps; // Start with current known steps
+        let approvedStepIsConfirmedCompleted = false;
+        let attempts = 0;
+        const maxAttempts = 10; // Poll for up to 5 seconds (10 * 500ms)
+        const pollInterval = 500; 
 
-        if (!stepConfig) {
-          console.error("Approved step configuration not found for id:", stepId);
-          return;
+        while (!approvedStepIsConfirmedCompleted && attempts < maxAttempts) {
+          currentStepsState = await refreshSteps(); // Get the latest state from backend
+          const approvedStepData = currentStepsState.find(s => s.id === stepId);
+          if (approvedStepData && approvedStepData.status === 'completed') {
+            approvedStepIsConfirmedCompleted = true;
+            addToast(`Step "${stepNameForToast}" confirmed completed by agent.`, 'success');
+          } else {
+            attempts++;
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
+          }
         }
 
-        // Optimistic UI Update for dependent steps
-        AGENT_STEPS.forEach(potentialNextStepConfig => {
-          if (potentialNextStepConfig.dependencies.includes(stepId)) {
-            // This step depends on the one just approved.
-            const dependentStepData = currentStepsState.find(s => s.id === potentialNextStepConfig.id);
-            if (dependentStepData && (dependentStepData.status === 'pending' || dependentStepData.status === 'waiting_dependency')) {
-              // Check if all *other* dependencies for this dependent step are met
-              const allOtherDependenciesMet = potentialNextStepConfig.dependencies
-                .filter(dep => dep !== stepId) // Exclude the just-approved step
-                .every(depId => {
-                  const depStepData = currentStepsState.find(s => s.id === depId);
-                  return depStepData && depStepData.status === 'completed';
-                });
-
-              if (allOtherDependenciesMet) {
-                addToast(`Optimistically setting "${potentialNextStepConfig.name}" to running.`, 'info');
-                optimisticallyUpdateStepStatus(potentialNextStepConfig.id, 'in_progress'); 
-              }
-            }
-          }
-        });
-
-        // Iterate through all potential next steps to see if they can be run
+        if (!approvedStepIsConfirmedCompleted) {
+          addToast(`Step "${stepNameForToast}" did not confirm completion quickly. Auto-run of next steps might rely on next scheduled refresh.`, 'info'); // Changed 'warning' to 'info'
+          // Proceed with currentStepsState, which might not have the approved step as 'completed' yet.
+          // The regular polling or a manual refresh will eventually catch up.
+        }
+        
+        // Ensure stepConfig (for dependencies) is from the constant AGENT_STEPS
+        // and stepData (for status and requiresUserInput) is from currentStepsState (from backend)
         for (const potentialNextStepConfig of AGENT_STEPS) {
-          // Find the current data for this potential next step
-          const stepData = currentStepsState.find(s => s.id === potentialNextStepConfig.id);
+          const potentialNextStepData = currentStepsState.find(s => s.id === potentialNextStepConfig.id);
 
-          if (stepData && (stepData.status === 'pending' || stepData.status === 'waiting_dependency')) {
+          if (potentialNextStepData && (potentialNextStepData.status === 'pending' || potentialNextStepData.status === 'waiting_dependency')) {
             const dependenciesMet = potentialNextStepConfig.dependencies.every(depId => {
               const depStepData = currentStepsState.find(s => s.id === depId);
               return depStepData && depStepData.status === 'completed';
             });
 
-            if (dependenciesMet) {
-              // Toasting for the outcome of the run is now handled by the runStep hook
+            if (dependenciesMet && !potentialNextStepData.requiresUserInput) {
+              addToast(`Dependencies met for "${potentialNextStepConfig.name}", attempting to run.`, 'info');
+              // runStep is already awaited in handleRunStep, and handleRunStep returns a promise
               const runResult = await handleRunStep(potentialNextStepConfig.id);
-              currentStepsState = runResult.updatedSteps; // Update currentStepsState for subsequent checks
+              currentStepsState = runResult.updatedSteps; // Refresh currentStepsState for the loop
+            } else if (dependenciesMet && potentialNextStepData.requiresUserInput) {
+              addToast(`Dependencies met for "${potentialNextStepConfig.name}", but it requires user input.`, 'info');
             }
           }
         }
