@@ -16,7 +16,7 @@
       "group": "performance_evaluation",
       "id": "evaluation_generation",
       "name": "Evaluation Generation",
-      "requiresUserInput": false
+      "requiresUserInput": true
     },
     {
       "dependencies": [
