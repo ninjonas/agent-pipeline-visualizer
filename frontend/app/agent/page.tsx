@@ -10,7 +10,7 @@ import { Step } from '@/types/agent';
 import { useToast } from '@/contexts/ToastContext';
 
 export default function AgentDashboard() {
-  const { steps, loading, error, refreshSteps, updateStepOutput } = useAgentSteps();
+  const { steps, loading, error, refreshSteps, updateStepOutput, runStep, runningStep } = useAgentSteps();
   const [selectedStep, setSelectedStep] = useState<Step | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const { addToast } = useToast();
@@ -82,6 +82,27 @@ export default function AgentDashboard() {
     }
   };
 
+  const handleRunStep = async (stepId: string) => {
+    const stepName = AGENT_STEPS.find(s => s.id === stepId)?.name || stepId;
+    const success = await runStep(stepId);
+    
+    if (success) {
+      // Select the step that was just run
+      const step = AGENT_STEPS.find(s => s.id === stepId);
+      if (step) {
+        const stepData = steps.find(s => s.id === stepId);
+        const stepToSelect = {
+          ...step,
+          status: stepData?.status || 'in_progress',
+          requiresUserInput: step.requiresUserInput,
+          dependencies: step.dependencies,
+        };
+        setSelectedStep(stepToSelect);
+        setSelectedFile(null);
+      }
+    }
+  };
+
   return (
     <div className="container mx-auto py-6">
       <h1 className="text-3xl font-bold mb-6 text-primary-700">Agent Dashboard</h1>
@@ -110,6 +131,9 @@ export default function AgentDashboard() {
                       isSelected={selectedStep?.id === step.id}
                       onClick={handleStepClick}
                       onApprove={handleApproveStep}
+                      onRunStep={handleRunStep}
+                      isRunning={runningStep === step.id}
+                      completedSteps={steps.filter(s => s.status === 'completed').map(s => s.id)}
                     />
                   );
                 })}
@@ -150,6 +174,33 @@ export default function AgentDashboard() {
                   >
                     Approve and Continue
                   </button>
+                </div>
+              )}
+              
+              {(selectedStep.status === 'pending' || selectedStep.status === 'waiting_dependency' || selectedStep.status === 'failed') && (
+                <div className="mt-6 flex justify-end">
+                  {/* Check if all dependencies are completed */}
+                  {(() => {
+                    const completedStepIds = steps.filter(s => s.status === 'completed').map(s => s.id);
+                    const canRun = selectedStep.dependencies.length === 0 || 
+                                  selectedStep.dependencies.every(depId => completedStepIds.includes(depId));
+                    
+                    return (
+                      <button
+                        onClick={() => handleRunStep(selectedStep.id)}
+                        disabled={runningStep === selectedStep.id || !canRun}
+                        className={`px-4 py-2 rounded-md transition-colors ${
+                          runningStep === selectedStep.id 
+                            ? 'bg-gray-300 text-gray-600 cursor-not-allowed' 
+                            : canRun
+                              ? 'bg-blue-600 text-white hover:bg-blue-700'
+                              : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                        }`}
+                      >
+                        {runningStep === selectedStep.id ? 'Running...' : canRun ? 'Run Step' : 'Waiting for Dependencies'}
+                      </button>
+                    );
+                  })()}
                 </div>
               )}
             </div>

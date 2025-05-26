@@ -5,9 +5,12 @@ interface StepCardProps {
   isSelected: boolean;
   onClick: (step: Step) => void;
   onApprove: (stepId: string) => void;
+  onRunStep?: (stepId: string) => void;
+  isRunning?: boolean;
+  completedSteps: string[]; // Add this to track which steps are completed
 }
 
-export function StepCard({ step, isSelected, onClick, onApprove }: StepCardProps) {
+export function StepCard({ step, isSelected, onClick, onApprove, onRunStep, isRunning = false, completedSteps = [] }: StepCardProps) {
   const statusColors = {
     pending: 'bg-gray-100 text-gray-800',
     waiting_dependency: 'bg-purple-100 text-purple-800',
@@ -18,6 +21,11 @@ export function StepCard({ step, isSelected, onClick, onApprove }: StepCardProps
   };
   
   const statusColor = statusColors[step.status as keyof typeof statusColors] || statusColors.pending;
+  
+  // Check if all dependencies are completed
+  const canRun = step.dependencies.length === 0 || 
+                step.dependencies.every(depId => completedSteps.includes(depId));
+  
   
   return (
     <div 
@@ -61,6 +69,25 @@ export function StepCard({ step, isSelected, onClick, onApprove }: StepCardProps
           className="mt-3 w-full px-3 py-1.5 bg-primary-600 text-white text-xs rounded hover:bg-primary-700 transition-colors"
         >
           Approve & Continue
+        </button>
+      )}
+      
+      {(step.status === 'pending' || step.status === 'waiting_dependency' || step.status === 'failed') && onRunStep && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onRunStep(step.id);
+          }}
+          disabled={isRunning || !canRun}
+          className={`mt-3 w-full px-3 py-1.5 text-xs rounded transition-colors ${
+            isRunning 
+              ? 'bg-gray-300 text-gray-600 cursor-not-allowed' 
+              : canRun
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+          }`}
+        >
+          {isRunning ? 'Running...' : canRun ? 'Run Step' : 'Waiting for Dependencies'}
         </button>
       )}
     </div>

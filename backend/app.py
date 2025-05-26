@@ -253,6 +253,49 @@ def api_approve_step(step_id):
     else:
         return jsonify({"error": "Step not in waiting_input state"}), 400
 
+@app.route('/api/steps/<step_id>/run', methods=['POST'])
+def api_run_step(step_id):
+    """Run a specific step"""
+    try:
+        # Import the necessary modules to run a step
+        import sys
+        sys.path.append(AGENT_DIR)
+        
+        # Check if the step exists
+        steps = get_step_status()
+        step = next((s for s in steps if s['id'] == step_id), None)
+        
+        if not step:
+            return jsonify({"status": "error", "error": f"Step {step_id} not found"}), 404
+        
+        # Check if dependencies are satisfied
+        for dep_id in step['dependencies']:
+            dep_step = next((s for s in steps if s['id'] == dep_id), None)
+            if not dep_step or dep_step['status'] != 'completed':
+                return jsonify({
+                    "status": "error", 
+                    "error": f"Step {step_id} has unsatisfied dependencies: {dep_id} is not completed"
+                }), 400
+        
+        from agent_base import AgentBase
+        
+        # Create agent instance
+        agent = AgentBase()
+        
+        # Run the step
+        success = agent.run_step(step_id)
+        
+        if success:
+            return jsonify({"status": "success", "message": f"Step {step_id} completed successfully"})
+        else:
+            return jsonify({"status": "error", "error": f"Step {step_id} failed to complete"}), 500
+    except ImportError as e:
+        print(f"Error importing modules: {e}")
+        return jsonify({"status": "error", "error": f"Server configuration error: {str(e)}"}), 500
+    except Exception as e:
+        print(f"Error running step: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/files', methods=['GET', 'POST'])
 def api_files():
     """Get or update file content"""

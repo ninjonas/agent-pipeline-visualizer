@@ -40,8 +40,25 @@ export function useAgentSteps() {
       });
       
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to run step');
+        // Try to parse as JSON, but handle the case when it's not JSON
+        let errorMessage = 'Failed to run step';
+        try {
+          const errorData = await response.json();
+          if (errorData && errorData.error) {
+            errorMessage = errorData.error;
+          }
+        } catch (parseError) {
+          // If we can't parse JSON, try to get the text instead
+          try {
+            const errorText = await response.text();
+            errorMessage = `Server error: ${response.status} ${response.statusText}`;
+            console.error('Error response text:', errorText);
+          } catch (textError) {
+            // If we can't even get text, just use the status
+            errorMessage = `Server error: ${response.status} ${response.statusText}`;
+          }
+        }
+        throw new Error(errorMessage);
       }
       
       // Refresh steps to get the latest status
@@ -82,30 +99,6 @@ export function useAgentSteps() {
     }
   }, []);
   
-  // Check if a step can run based on its dependencies
-  const canRunStep = useCallback((stepId: string): boolean => {
-    // Find the step in our steps list
-    const step = steps.find(s => s.id === stepId);
-    if (!step) return false;
-    
-    // A step can run if it's:
-    // 1. In pending, waiting_dependency, or failed state
-    // 2. All dependencies have been completed
-    
-    if (!['pending', 'waiting_dependency', 'failed'].includes(step.status)) {
-      return false;
-    }
-    
-    // Check all dependencies are completed
-    if (step.dependencies && step.dependencies.length > 0) {
-      const dependencySteps = steps.filter(s => step.dependencies.includes(s.id));
-      return dependencySteps.every(s => s.status === 'completed');
-    }
-    
-    // No dependencies, so it can run
-    return true;
-  }, [steps]);
-  
   // Initial fetch of steps
   useEffect(() => {
     refreshSteps();
@@ -115,10 +108,9 @@ export function useAgentSteps() {
     steps,
     loading,
     error,
-    runningStep,
     refreshSteps,
     updateStepOutput,
     runStep,
-    canRunStep,
+    runningStep,
   };
 }
