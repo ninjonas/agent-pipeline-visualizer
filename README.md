@@ -66,17 +66,17 @@ The project includes a comprehensive `run.sh` script to manage all components:
 
 ### Performance Evaluation
 
-- **data_analysis**: Analyze performance data to identify trends
-- **evaluation_generation**: Generate performance evaluations
-- **create_contribution_goal**: Create measurable contribution goals
-- **create_development_item**: Create development items
+- **data_analysis**: Analyze performance data to identify trends and areas for improvement.
+- **evaluation_generation**: Generate performance evaluations based on the analysis of data and feedback.
+- **create_contribution_goal**: Create specific, measurable contribution goals for team members.
+- **create_development_item**: Create development items to help team members improve their skills.
 
 ### Monthly Check-ins
 
-- **update_contribution_goal**: Update goals based on progress
-- **update_development_item**: Update development items
-- **timely_feedback**: Provide feedback based on performance
-- **coaching**: Provide coaching and support
+- **update_contribution_goal**: Update contribution goals based on the progress made.
+- **update_development_item**: Update development items based on the progress made.
+- **timely_feedback**: Provide timely feedback to team members based on their performance.
+- **coaching**: Provide coaching and support to help team members achieve their goals.
 
 ## Project Structure
 
