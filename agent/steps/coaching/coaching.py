@@ -3,6 +3,7 @@ import json
 import random
 from datetime import datetime
 from agent.step_base import StepBase
+from loguru import logger
 
 class CoachingStep(StepBase):
     """
@@ -18,7 +19,7 @@ class CoachingStep(StepBase):
         Returns:
             bool: True if the step was successful, False otherwise.
         """
-        self.logger.info("Executing Coaching step")
+        logger.info("Executing Coaching step")
         
         # Read updated development items from previous step
         development_items_path = os.path.join(
@@ -38,7 +39,7 @@ class CoachingStep(StepBase):
             )
         
         if not os.path.exists(development_items_path):
-            self.logger.error("Development items not found. Please run create_development_item or update_development_item step first.")
+            logger.error("Development items not found. Please run create_development_item or update_development_item step first.")
             return False
         
         # Also read the timely feedback if available
@@ -51,12 +52,32 @@ class CoachingStep(StepBase):
         
         feedback_data = None
         if os.path.exists(feedback_path):
-            with open(feedback_path, "r") as f:
-                feedback_data = json.load(f)
+            try:
+                with open(feedback_path, "r", encoding="utf-8") as f:
+                    feedback_data = json.load(f)
+            except FileNotFoundError:
+                logger.error(f"Feedback file not found at {feedback_path}")
+                # Continue without feedback data if not found, as it's optional
+            except json.JSONDecodeError:
+                logger.error(f"Error decoding JSON from {feedback_path}")
+                # Continue without feedback data if JSON is invalid
+            except OSError as e:
+                logger.error(f"An OS error occurred while reading {feedback_path}: {e}")
+                # Continue without feedback data on other OS errors
         
         # Load development items
-        with open(development_items_path, "r") as f:
-            development_items = json.load(f)
+        try:
+            with open(development_items_path, "r", encoding="utf-8") as f:
+                development_items = json.load(f)
+        except FileNotFoundError:
+            logger.error(f"Development items file not found at {development_items_path}")
+            return False
+        except json.JSONDecodeError:
+            logger.error(f"Error decoding JSON from {development_items_path}")
+            return False
+        except OSError as e:
+            logger.error(f"An OS error occurred while reading {development_items_path}: {e}")
+            return False
         
         # Generate coaching plans
         coaching_plans = self._generate_coaching_plans(development_items, feedback_data)
@@ -115,7 +136,7 @@ class CoachingStep(StepBase):
                 "coaching_sessions": coaching_sessions,
                 "resources": resources,
                 "check_in_frequency": random.choice(["Weekly", "Bi-weekly", "Monthly"]),
-                "success_metrics": self._generate_success_metrics(focus_areas, role)
+                "success_metrics": self._generate_success_metrics(focus_areas) # Removed role argument
             }
             
             coaching_plans.append(coaching_plan)
@@ -220,7 +241,7 @@ class CoachingStep(StepBase):
         """Generate coaching sessions based on focus areas"""
         coaching_sessions = []
         
-        for i, area in enumerate(focus_areas):
+        for _, area in enumerate(focus_areas): # Replaced i with _
             # Generate 2-3 sessions per focus area
             num_sessions = random.randint(2, 3)
             area_title = area["title"]
@@ -468,7 +489,7 @@ class CoachingStep(StepBase):
         
         return resources
     
-    def _generate_success_metrics(self, focus_areas, role):
+    def _generate_success_metrics(self, focus_areas): # Removed role parameter
         """Generate success metrics for the coaching plan"""
         metrics = []
         
@@ -499,9 +520,9 @@ class CoachingStep(StepBase):
                 metrics.append({
                     "focus_area": area_title,
                     "metrics": [
-                        f"Stakeholder feedback indicates improved clarity in {area_title}",
+                        "Stakeholder feedback indicates improved clarity in {area_title}",
                         f"Successfully delivered presentations demonstrating {area_title} skills",
-                        f"Reduced incidents of miscommunication in relevant contexts"
+                        "Reduced incidents of miscommunication in relevant contexts" # Removed f-string
                     ]
                 })
             else:

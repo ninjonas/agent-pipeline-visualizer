@@ -1,6 +1,7 @@
 import os
 import json
 from agent.step_base import StepBase
+from loguru import logger
 
 class EvaluationGenerationStep(StepBase):
     """
@@ -16,7 +17,7 @@ class EvaluationGenerationStep(StepBase):
         Returns:
             bool: True if the step was successful, False otherwise.
         """
-        self.logger.info("Executing Evaluation Generation step")
+        logger.info("Executing Evaluation Generation step")
         
         # Read analysis results from previous step
         analysis_path = os.path.join(
@@ -27,11 +28,11 @@ class EvaluationGenerationStep(StepBase):
         )
         
         if not os.path.exists(analysis_path):
-            self.logger.error("Analysis results not found. Please run data_analysis step first.")
+            logger.error("Analysis results not found. Please run data_analysis step first.")
             return False
         
         # Load analysis results
-        with open(analysis_path, "r") as f:
+        with open(analysis_path, "r", encoding="utf-8") as f:
             analysis_data = json.load(f)
         
         # Also read the team data
@@ -43,11 +44,11 @@ class EvaluationGenerationStep(StepBase):
         )
         
         if not os.path.exists(team_data_path):
-            self.logger.error("Team data not found. Please run data_analysis step first.")
+            logger.error("Team data not found. Please run data_analysis step first.")
             return False
         
         # Load team data
-        with open(team_data_path, "r") as f:
+        with open(team_data_path, "r", encoding="utf-8") as f:
             team_data = json.load(f)
         
         # Generate evaluations
@@ -154,38 +155,38 @@ class EvaluationGenerationStep(StepBase):
                 if strength == "Code Quality":
                     evaluation_text.append(
                         f"{analysis['member_name']} consistently delivers well-structured, maintainable code "
-                        f"with appropriate documentation and test coverage."
+                        "with appropriate documentation and test coverage."
                     )
                 elif strength == "Productivity":
                     evaluation_text.append(
                         f"{analysis['member_name']} has demonstrated high productivity, "
-                        f"efficiently completing tasks and consistently meeting deadlines."
+                        "efficiently completing tasks and consistently meeting deadlines."
                     )
                 elif strength == "Collaboration":
                     evaluation_text.append(
                         f"{analysis['member_name']} works effectively with team members, "
-                        f"actively participates in discussions, and provides valuable input to the team."
+                        "actively participates in discussions, and provides valuable input to the team."
                     )
                 elif strength == "Innovation":
                     evaluation_text.append(
                         f"{analysis['member_name']} regularly contributes innovative ideas "
-                        f"and approaches to solving problems."
+                        "and approaches to solving problems."
                     )
                 elif strength == "Reliability":
                     evaluation_text.append(
                         f"{analysis['member_name']} is highly reliable, consistently delivering on commitments "
-                        f"and maintaining high standards of work."
+                        "and maintaining high standards of work."
                     )
                 elif strength == "Customer Focus":
                     evaluation_text.append(
                         f"{analysis['member_name']} demonstrates strong customer focus, "
-                        f"understanding user needs and delivering solutions that address those needs effectively."
+                        "understanding user needs and delivering solutions that address those needs effectively."
                     )
         
         # Areas for improvement
         if improvement_areas:
             evaluation_text.append(
-                f"\nAreas where {analysis['member_name']} could focus on improvement include "
+                f"\\nAreas where {analysis['member_name']} could focus on improvement include "
                 f"{', '.join(improvement_areas[:-1]) + ' and ' + improvement_areas[-1] if len(improvement_areas) > 1 else improvement_areas[0]}."
             )
             
@@ -193,33 +194,33 @@ class EvaluationGenerationStep(StepBase):
             for area in improvement_areas:
                 if area == "Code Quality":
                     evaluation_text.append(
-                        f"Consider investing more time in code reviews, writing unit tests, "
-                        f"and ensuring code is well-documented and maintainable."
+                        "Consider investing more time in code reviews, writing unit tests, "
+                        "and ensuring code is well-documented and maintainable."
                     )
                 elif area == "Productivity":
                     evaluation_text.append(
-                        f"Focus on time management and prioritization to increase productivity. "
-                        f"Consider techniques like time-blocking or the Pomodoro method."
+                        "Focus on time management and prioritization to increase productivity. "
+                        "Consider techniques like time-blocking or the Pomodoro method."
                     )
                 elif area == "Collaboration":
                     evaluation_text.append(
-                        f"Seek more opportunities to collaborate with team members, "
-                        f"actively participate in discussions, and share knowledge."
+                        "Seek more opportunities to collaborate with team members, "
+                        "actively participate in discussions, and share knowledge."
                     )
                 elif area == "Innovation":
                     evaluation_text.append(
-                        f"Challenge yourself to think creatively about problems and solutions. "
-                        f"Consider dedicating time to explore new technologies or approaches."
+                        "Challenge yourself to think creatively about problems and solutions. "
+                        "Consider dedicating time to explore new technologies or approaches."
                     )
                 elif area == "Reliability":
                     evaluation_text.append(
-                        f"Work on setting realistic expectations and consistently meeting commitments. "
-                        f"Communicate proactively if you anticipate challenges in meeting deadlines."
+                        "Work on setting realistic expectations and consistently meeting commitments. "
+                        "Communicate proactively if you anticipate challenges in meeting deadlines."
                     )
                 elif area == "Customer Focus":
                     evaluation_text.append(
-                        f"Deepen your understanding of user needs and perspectives. "
-                        f"Consider participating in user research or customer interviews."
+                        "Deepen your understanding of user needs and perspectives. "
+                        "Consider participating in user research or customer interviews."
                     )
         
         # Project contributions
@@ -363,24 +364,24 @@ class EvaluationGenerationStep(StepBase):
         
         markdown += "## Individual Ratings\n\n"
         markdown += "| Team Member | Role | Rating | Top Strength | Primary Development Area |\n"
-        markdown += "|------------|------|--------|-------------|-------------------------|\n"
+        markdown += "|------------|------|--------|-------------|-------------------------|\\n"
         
-        for eval in evaluations:
-            name = eval["member_name"]
-            role = eval["role"]
-            rating = eval["overall_rating"]
+        for eval_item in evaluations:
+            name = eval_item["member_name"]
+            role = eval_item["role"]
+            rating = eval_item["overall_rating"]
             
-            top_strength = eval["strengths"][0].replace("_", " ").title() if eval["strengths"] else "N/A"
-            top_improvement = eval["improvement_areas"][0].replace("_", " ").title() if eval["improvement_areas"] else "N/A"
+            top_strength = eval_item["strengths"][0].replace("_", " ").title() if eval_item["strengths"] else "N/A"
+            top_improvement = eval_item["improvement_areas"][0].replace("_", " ").title() if eval_item["improvement_areas"] else "N/A"
             
-            markdown += f"| {name} | {role} | {rating} | {top_strength} | {top_improvement} |\n"
+            markdown += f"| {name} | {role} | {rating} | {top_strength} | {top_improvement} |\\n"
         
-        markdown += "\n## Common Strengths\n\n"
+        markdown += "\\n## Common Strengths\\n\\n"
         
         # Collect all strengths
         all_strengths = {}
-        for eval in evaluations:
-            for strength in eval["strengths"]:
+        for eval_item in evaluations:
+            for strength in eval_item["strengths"]:
                 if strength in all_strengths:
                     all_strengths[strength] += 1
                 else:
@@ -397,8 +398,8 @@ class EvaluationGenerationStep(StepBase):
         
         # Collect all improvement areas
         all_improvements = {}
-        for eval in evaluations:
-            for area in eval["improvement_areas"]:
+        for eval_item in evaluations:
+            for area in eval_item["improvement_areas"]:
                 if area in all_improvements:
                     all_improvements[area] += 1
                 else:

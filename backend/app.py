@@ -4,6 +4,14 @@ import os
 import json
 import shutil
 from pathlib import Path
+from loguru import logger
+
+# Configure Loguru logger
+# Ensure the log directory exists relative to this script's location
+log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'log'))
+os.makedirs(log_dir, exist_ok=True)
+log_file_path = os.path.join(log_dir, 'backend.log')
+logger.add(log_file_path, rotation="10 MB", retention="7 days", level="ERROR", format="{time} {level} {message}")
 
 app = Flask(__name__)
 CORS(app)
@@ -51,7 +59,7 @@ def load_config():
             with open(CONFIG_FILE, 'r') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"Error loading config: {e}")
+            logger.error(f"Error loading config: {e}")
     
     # Default configuration if file doesn't exist
     default_config = {
@@ -147,7 +155,7 @@ def get_step_status():
             with open(status_file, 'r') as f:
                 status = json.load(f)
         except Exception as e:
-            print(f"Error loading status: {e}")
+            logger.error(f"Error loading status: {e}")
             status = {}
     else:
         status = {}
@@ -229,16 +237,62 @@ def api_steps():
     steps = get_step_status()
     return jsonify({"steps": steps})
 
-@app.route('/api/steps/<step_id>', methods=['GET'])
+@app.route('/api/steps/<step_id>', methods=['GET', 'POST']) # Allow POST
 def api_step(step_id):
-    """Get a specific step with its status"""
-    steps = get_step_status()
-    step = next((s for s in steps if s['id'] == step_id), None)
+    if request.method == 'GET':
+        steps = get_step_status()
+        step = next((s for s in steps if s['id'] == step_id), None)
+        
+        if step:
+            return jsonify(step)
+        else:
+            return jsonify({"error": "Step not found"}), 404
     
-    if step:
-        return jsonify(step)
-    else:
-        return jsonify({"error": "Step not found"}), 404
+    elif request.method == 'POST': # Handle POST from agent
+        data = request.json
+        new_status = data.get('status')
+        # message = data.get('message') # Optional: if agent sends a message
+
+        if not new_status:
+            logger.error(f"Received POST to /api/steps/{step_id} without status in JSON body.")
+            return jsonify({"error": "Missing status in request"}), 400
+
+        status_file = os.path.join(AGENT_DIR, 'status.json')
+        
+        try:
+            current_status_data: dict = {}
+            if os.path.exists(status_file):
+                with open(status_file, 'r') as f:
+                    # Ensure we handle empty or invalid JSON gracefully
+                    try:
+                        content = f.read()
+                        if content.strip(): # Check if file is not empty
+                            current_status_data = json.loads(content)
+                        else:
+                            logger.warning("status.json was empty. Initializing.") # Corrected: Removed f-string
+                    except json.JSONDecodeError as jde:
+                        logger.error(f"Error decoding status.json: {jde}. Re-initializing status.")
+                        current_status_data = {} # Reset if malformed
+            
+            if step_id not in current_status_data:
+                current_status_data[step_id] = {}
+            
+            current_status_data[step_id]['status'] = new_status
+            # if message: # If handling messages
+            #     current_status_data[step_id]['message'] = message
+            # else:
+            #     current_status_data[step_id].pop('message', None)
+
+            with open(status_file, 'w') as f:
+                json.dump(current_status_data, f, indent=2)
+            
+            logger.info(f"Status for step '{step_id}' updated to '{new_status}' by agent POST notification.")
+            # TODO: Consider WebSocket push here for real-time UI update without polling
+            return jsonify({"status": "success", "message": f"Status for {step_id} updated to {new_status}"})
+
+        except Exception as e:
+            logger.error(f"Error updating status for step '{step_id}' via agent POST notification: {e}")
+            return jsonify({"error": f"Failed to update status: {str(e)}"}), 500
 
 @app.route('/api/steps/<step_id>/files', methods=['GET'])
 def api_step_files(step_id):
@@ -323,13 +377,13 @@ def api_run_step(step_id):
             return jsonify({"status": "error", "error": error_message, "steps": updated_steps_status}), 500
 
     except ImportError as e:
-        print(f"ImportError in api_run_step for {step_id}: {e}")
-        print(f"Current sys.path: {sys.path}")
-        print(f"AGENT_DIR: {AGENT_DIR}")
+        logger.error(f"ImportError in api_run_step for {step_id}: {e}")
+        logger.info(f"Current sys.path: {sys.path}")
+        logger.info(f"AGENT_DIR: {AGENT_DIR}")
         current_steps_status_on_error = get_step_status() if 'current_steps_status' in locals() else []
         return jsonify({"status": "error", "error": f"Server configuration error (ImportError): {str(e)}", "steps": current_steps_status_on_error}), 500
     except Exception as e:
-        print(f"Error running step {step_id}: {e}")
+        logger.error(f"Error running step {step_id}: {e}")
         current_steps_status_on_error = get_step_status() if 'current_steps_status' in locals() else []
         return jsonify({"status": "error", "error": str(e), "steps": current_steps_status_on_error}), 500
 

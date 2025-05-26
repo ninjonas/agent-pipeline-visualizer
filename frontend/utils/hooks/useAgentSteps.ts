@@ -11,10 +11,10 @@ export function useAgentSteps() {
   const [runningStep, setRunningStep] = useState<string | null>(null);
   const { addToast } = useToast();
 
-  const optimisticallyUpdateStepStatus = useCallback((stepId: string, newStatus: Step['status']) => {
+  const optimisticallyUpdateStepStatus = useCallback((stepId: string, newStatus: Step['status'], message?: string) => {
     setSteps(prevSteps =>
       prevSteps.map(step =>
-        step.id === stepId ? { ...step, status: newStatus } : step
+        step.id === stepId ? { ...step, status: newStatus, message: message || step.message } : step
       )
     );
   }, [setSteps]);
@@ -42,16 +42,20 @@ export function useAgentSteps() {
   }, [setSteps, setError, setLoading]); // Dependencies for useCallback
 
   const runStep = useCallback(async (stepId: string): Promise<{ success: boolean, updatedSteps: Step[] }> => {
-    setRunningStep(stepId);
+    // Optimistically set to in_progress
+    optimisticallyUpdateStepStatus(stepId, 'in_progress');
+    setRunningStep(stepId); // Keep this to disable run button etc.
     addToast(`Initiating run for step: ${stepId}...`, 'info');
     let success = false;
-    let finalUpdatedSteps: Step[] = steps; // Default to current steps in case of early error
+    let finalUpdatedSteps: Step[] = steps; // Initialize with current steps
 
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/api/steps/${stepId}/run`, {
         method: 'POST',
       });
 
+      // Even if the /run call itself fails, we should refresh to get the latest state,
+      // as the agent might have started and failed, updating status.json.
       if (!response.ok) {
         let errorMessage = `Failed to run step ${stepId}`;
         try {
@@ -63,149 +67,69 @@ export function useAgentSteps() {
           const errorText = await response.text();
           errorMessage = `Server error for step ${stepId}: ${response.status} ${response.statusText || errorText}`;
         }
-        throw new Error(errorMessage);
+        // Don't throw yet, refresh first, then use this error if needed.
+        console.error(errorMessage); // Log the initial error
       }
 
-      const resultData = await response.json();
-      // Use steps from response if available, as it's the most current state after the run action
-      if (resultData.steps) {
-        finalUpdatedSteps = resultData.steps;
-        setSteps(finalUpdatedSteps); // Ensure the hook's state is updated
-      } else {
-        // Fallback to refreshSteps if backend didn't send the steps array for some reason
-        finalUpdatedSteps = await refreshSteps(); // refreshSteps calls setSteps internally
-      }
+      // ALWAYS refresh steps after a run attempt to get the most authoritative state
+      // This state comes from status.json, which the agent updates directly via its own POST.
+      finalUpdatedSteps = await refreshSteps(); 
 
+      const currentStepData = finalUpdatedSteps.find(s => s.id === stepId);
       let safeStepName = stepId;
-      try {
-        const step = finalUpdatedSteps.find(s => s.id === stepId);
-        if (step && typeof step.name === 'string') {
-          safeStepName = step.name;
-        } else if (step && step.name !== null && step.name !== undefined) {
-          safeStepName = String(step.name);
-        }
-      } catch (e: any) {
-        console.warn(`[useAgentSteps] Error converting step.name to string for step '${stepId}':`, e);
-        safeStepName = `${stepId} (name error: ${e.message || 'unknown'})`;
+      if (currentStepData?.name) {
+        safeStepName = currentStepData.name;
       }
+      
+      let safeCurrentStatus: Step['status'] = currentStepData?.status || 'unknown' as Step['status'];
 
-      if (resultData.status === 'success') {
-        const currentStepData = finalUpdatedSteps.find(s => s.id === stepId);
-        let safeCurrentStatus = 'unknown';
-        if (currentStepData && typeof currentStepData.status === 'string') {
-          safeCurrentStatus = currentStepData.status;
-        } else if (currentStepData && currentStepData.status !== null && currentStepData.status !== undefined) {
-          try {
-            safeCurrentStatus = String(currentStepData.status);
-          } catch (e: any) {
-            console.warn(`[useAgentSteps] Error converting currentStepData.status to string for step '${stepId}':`, e);
-            safeCurrentStatus = `(status error: ${e.message || 'unknown'})`;
-          }
-        }
-
-        if (safeCurrentStatus === 'completed' || safeCurrentStatus === 'in_progress' || safeCurrentStatus === 'waiting_input') {
-          addToast(`Step "${safeStepName}" processed. Current status: ${safeCurrentStatus}.`, 'success');
-          success = true;
-        } else if (safeCurrentStatus === 'failed') {
-          let safeResultMessage = '';
-          if (resultData && resultData.hasOwnProperty('message')) {
-            const rawMessage = resultData.message;
-            if (typeof rawMessage === 'string') {
-              safeResultMessage = rawMessage;
-            } else if (rawMessage !== null && rawMessage !== undefined) {
-              try {
-                safeResultMessage = String(rawMessage);
-              } catch (e: any) {
-                console.warn(`[useAgentSteps] Error converting resultData.message to string for step '${stepId}' (in failed status block):`, e);
-                safeResultMessage = `(error processing message: ${e.message || 'unknown'})`;
-              }
-            }
-          }
-          addToast(`Step "${safeStepName}" failed. ${safeResultMessage || ''}`, 'error');
-          success = false;
-        } else {
-           // Safely process resultData.message (already improved by previous fix, ensure consistency)
-           let messageText = '';
-           if (resultData && resultData.hasOwnProperty('message')) {
-             const rawMessage = resultData.message;
-             if (typeof rawMessage === 'string') {
-               messageText = rawMessage;
-             } else if (rawMessage !== null && rawMessage !== undefined) {
-               try {
-                 messageText = String(rawMessage);
-               } catch (e: any) {
-                 console.warn(`[useAgentSteps] Error converting resultData.message to string for step '${stepId}':`, e);
-                 messageText = `(error processing message: ${e.message || 'unknown'})`;
-               }
-             }
-           }
-           addToast(`Step "${safeStepName}" run initiated. Status: ${safeCurrentStatus || 'unknown'}. ${messageText}`, 'info');
-           success = true;
-        }
-      } else { // resultData.status was 'error' or not 'success'
-        let safeResultError = 'Unknown error from server.';
-        if (resultData && resultData.hasOwnProperty('error')) {
-            const rawError = resultData.error;
-            if (typeof rawError === 'string') {
-                safeResultError = rawError;
-            } else if (rawError !== null && rawError !== undefined) {
-                try {
-                    safeResultError = String(rawError);
-                } catch (e: any) {
-                    console.warn(`[useAgentSteps] Error converting resultData.error to string for step '${stepId}':`, e);
-                    safeResultError = `(error processing server error: ${e.message || 'unknown'})`;
-                }
-            }
-        }
-        addToast(`Failed to process step "${safeStepName}". ${safeResultError}`, 'error');
+      // Determine overall success based on the refreshed step status
+      if (safeCurrentStatus === 'completed') {
+        addToast(`Step "${safeStepName}" completed successfully.`, 'success');
+        success = true;
+      } else if (safeCurrentStatus === 'failed') {
+        addToast(`Step "${safeStepName}" failed. ${currentStepData?.message || 'Review agent logs.'}` , 'error');
         success = false;
+      } else if (safeCurrentStatus === 'in_progress' || safeCurrentStatus === 'waiting_input') {
+        addToast(`Step "${safeStepName}" is now ${safeCurrentStatus.replace('_',' ')}.`, 'info');
+        success = true; // The run was initiated, step is processing or waiting
+      } else {
+        // If the /run response was not ok, and status isn't failed/completed, reflect that.
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: "Failed to parse error from run endpoint."}));
+            addToast(`Failed to properly initiate step "${safeStepName}". Status: ${safeCurrentStatus}. Error: ${errorData.error || response.statusText}`, 'error');
+            success = false;
+        } else {
+            addToast(`Step "${safeStepName}" has status: ${safeCurrentStatus}.`, 'info');
+            success = true; // Default to success if status is unusual but call succeeded
+        }
       }
-    } catch (err: any) {
-      // Ensure safeStepName is defined in this scope for the catch block's addToast
+
+    } catch (err: any) { // Catch errors from fetch itself or from refreshSteps
       let stepNameForCatch = stepId;
       try {
-        const step = finalUpdatedSteps.find(s => s.id === stepId); // finalUpdatedSteps might be from before error
-        if (step && typeof step.name === 'string') {
+        const step = finalUpdatedSteps.find(s => s.id === stepId); 
+        if (step?.name) {
           stepNameForCatch = step.name;
-        } else if (step && step.name !== null && step.name !== undefined) {
-          stepNameForCatch = String(step.name);
         }
       } catch (e: any) {
          console.warn(`[useAgentSteps] Error converting step.name to string in catch block for step '${stepId}':`, e);
-         stepNameForCatch = `${stepId} (name error in catch: ${e.message || 'unknown'})`;
       }
-      console.error(`Error running step "${stepId}":`, err instanceof Error ? err.message : String(err));
-      let errorMessageForToast = 'unknown error';
-      if (err instanceof Error) {
-        errorMessageForToast = err.message;
-      } else if (err && err.hasOwnProperty('message')) {
-        try {
-          errorMessageForToast = String(err.message);
-        } catch (e: any) {
-          errorMessageForToast = `(error processing error message: ${e.message || 'unknown'})`;
-        }
-      } else {
-        try {
-          errorMessageForToast = String(err);
-        } catch (e: any) {
-          errorMessageForToast = `(error converting error to string: ${e.message || 'unknown'})`;
-        }
-      }
-      addToast(`Error initiating run for step "${stepNameForCatch}": ${errorMessageForToast}`, 'error');
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error(`Error during runStep for "${stepId}":`, errorMessage);
+      addToast(`Error processing step "${stepNameForCatch}": ${errorMessage}`, 'error');
       success = false;
-      // Ensure steps are refreshed even on error to get latest state if possible
+      // Attempt to refresh steps one last time to ensure UI consistency with backend state
       try {
-        finalUpdatedSteps = await refreshSteps(); // refreshSteps calls setSteps
+        finalUpdatedSteps = await refreshSteps();
       } catch (refreshError) {
         console.error('Failed to refresh steps after run error:', refreshError);
-        // Keep finalUpdatedSteps as they were or set to current `steps` state
-        // setSteps might have already been called by the refreshSteps above if it didn't throw
       }
     } finally {
       setRunningStep(null);
     }
     return { success, updatedSteps: finalUpdatedSteps };
-  }, [addToast, refreshSteps, steps, setSteps]); // Added setSteps to dependency array
+  }, [addToast, refreshSteps, optimisticallyUpdateStepStatus, steps, setSteps]); // Added steps and setSteps
   
   const updateStepOutput = useCallback(async (stepId: string, filePath: string, content: string): Promise<boolean> => {
     try {

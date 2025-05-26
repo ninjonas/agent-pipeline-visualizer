@@ -2,6 +2,7 @@ import os
 import json
 import random
 from agent.step_base import StepBase
+from loguru import logger
 
 class DataAnalysisStep(StepBase):
     """
@@ -17,7 +18,7 @@ class DataAnalysisStep(StepBase):
         Returns:
             bool: True if the step was successful, False otherwise.
         """
-        self.logger.info("Executing Data Analysis step")
+        logger.info("Executing Data Analysis step")
         
         # Create sample data if it doesn't exist
         if not self.list_input_files():
@@ -86,21 +87,48 @@ class DataAnalysisStep(StepBase):
         team_data_path = self.get_input_path("team_data.json")
         
         if os.path.exists(team_data_path):
-            with open(team_data_path, "r") as f:
-                return json.load(f)
-        
-        # If no input data, check if we already created sample data
+            try:
+                with open(team_data_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except FileNotFoundError:
+                logger.error(f"Team data file not found at {team_data_path} (input dir)")
+            except json.JSONDecodeError:
+                logger.error(f"Error decoding JSON from {team_data_path} (input dir)")
+            except OSError as e:
+                logger.error(f"An OS error occurred while reading {team_data_path} (input dir): {e}")
+
+        # If no input data, check if we already created sample data in output
         team_data_path = self.get_output_path("team_data.json")
         
         if os.path.exists(team_data_path):
-            with open(team_data_path, "r") as f:
-                return json.load(f)
-        
+            try:
+                with open(team_data_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except FileNotFoundError:
+                logger.error(f"Team data file not found at {team_data_path} (output dir)")
+            except json.JSONDecodeError:
+                logger.error(f"Error decoding JSON from {team_data_path} (output dir)")
+            except OSError as e:
+                logger.error(f"An OS error occurred while reading {team_data_path} (output dir): {e}")
+
         # If we get here, we need to create sample data
+        logger.info("No existing team data found, creating sample data.")
         self._create_sample_data()
         
-        with open(team_data_path, "r") as f:
-            return json.load(f)
+        # Try to load the newly created sample data
+        team_data_path = self.get_output_path("team_data.json") # Ensure we are using output path for newly created sample
+        try:
+            with open(team_data_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            logger.error(f"Failed to load newly created sample data from {team_data_path}")
+            return [] # Return empty list if sample creation/loading fails
+        except json.JSONDecodeError:
+            logger.error(f"Error decoding newly created sample data from {team_data_path}")
+            return [] # Return empty list if sample creation/loading fails
+        except OSError as e:
+            logger.error(f"An OS error occurred while reading newly created sample data from {team_data_path}: {e}")
+            return [] # Return empty list if sample creation/loading fails
     
     def _analyze_data(self, team_data: list) -> dict:
         """Analyze the team performance data"""
@@ -150,7 +178,6 @@ class DataAnalysisStep(StepBase):
             # Find strengths and areas for improvement
             for metric in metrics:
                 q3_score = member["performance"][metric]["Q3"]
-                team_avg = results["team_average"][metric]["Q3"]
                 
                 if q3_score >= 4.0:
                     strengths.append(metric)

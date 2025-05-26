@@ -1,6 +1,6 @@
 import os
-import logging
-from typing import Dict, Any, Optional
+from typing import Optional
+from loguru import logger
 
 class StepBase:
     """Base class for all agent steps"""
@@ -9,17 +9,6 @@ class StepBase:
         self.step_id = step_id
         self.input_dir = input_dir
         self.output_dir = output_dir
-        
-        # Setup logging
-        self.logger = logging.getLogger(f"agent.step.{step_id}")
-        self.logger.setLevel(logging.INFO)
-        
-        # Add console handler if not already added
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
     
     def execute(self) -> bool:
         """
@@ -96,8 +85,15 @@ class StepBase:
         if not os.path.exists(file_path):
             return default
         
-        with open(file_path, "r") as f:
-            return f.read()
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except UnicodeError as e:
+            logger.error(f"UnicodeError reading input file {file_path}: {e}")
+            return default
+        except OSError as e: # Catches IOError as well
+            logger.error(f"OS error reading input file {file_path}: {e}")
+            return default
     
     def write_output_file(self, filename: str, content: str) -> None:
         """
@@ -111,8 +107,13 @@ class StepBase:
         
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         
-        with open(file_path, "w") as f:
-            f.write(content)
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+        except UnicodeError as e:
+            logger.error(f"UnicodeError writing output file {file_path}: {e}")
+        except OSError as e: # Catches IOError as well
+            logger.error(f"OS error writing output file {file_path}: {e}")
     
     def copy_input_to_output(self, filename: str) -> bool:
         """
@@ -122,19 +123,26 @@ class StepBase:
             filename: The name of the input file.
             
         Returns:
-            bool: True if the file was copied, False if the input file does not exist.
+            bool: True if the file was copied, False if the input file does not exist or an error occurred.
         """
         input_path = self.get_input_path(filename)
         
         if not os.path.exists(input_path):
+            logger.warning(f"Input file {input_path} not found for copy.")
             return False
         
         output_path = self.get_output_path(filename)
         
-        with open(input_path, "r") as in_file:
-            content = in_file.read()
-        
-        with open(output_path, "w") as out_file:
-            out_file.write(content)
-        
-        return True
+        try:
+            with open(input_path, "r", encoding="utf-8") as in_file:
+                content = in_file.read()
+            
+            with open(output_path, "w", encoding="utf-8") as out_file:
+                out_file.write(content)
+            return True
+        except UnicodeError as e:
+            logger.error(f"UnicodeError copying file from {input_path} to {output_path}: {e}")
+            return False
+        except OSError as e: # Catches IOError as well
+            logger.error(f"OS error copying file from {input_path} to {output_path}: {e}")
+            return False

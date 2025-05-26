@@ -1,12 +1,19 @@
 import os
-import sys
 import json
 import time
-import argparse
 import importlib.util
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 import requests
+from loguru import logger
+
+# Configure Loguru logger for the agent
+# Ensure the log directory exists relative to this script's location
+# (assuming this script is in the 'agent' directory)
+log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'log'))
+os.makedirs(log_dir, exist_ok=True)
+log_file_path = os.path.join(log_dir, 'agent.log')
+logger.add(log_file_path, rotation="10 MB", retention="7 days", level="INFO", format="{time} {level} {message}")
+
 
 class AgentBase:
     """Base class for AI Agent implementations"""
@@ -131,7 +138,7 @@ class AgentBase:
         try:
             requests.post(f"{self.api_url}/api/steps/{step_id}", json={"status": status})
         except Exception as e:
-            print(f"Warning: Failed to notify API of status change: {e}")
+            logger.warning(f"Failed to notify API of status change: {e}")
     
     def _get_step_config(self, step_id: str) -> Optional[Dict[str, Any]]:
         """Get configuration for a specific step"""
@@ -177,18 +184,18 @@ class AgentBase:
             os.remove(approval_file)
             return True
         
-        print(f"Waiting for user approval of step '{step_id}'...")
-        print(f"Please review the output files in '{os.path.join(self._get_step_path(step_id), 'out')}'")
-        print("Once you've reviewed the output, approve the step in the web interface or press Enter to continue.")
+        logger.info(f"Waiting for user approval of step '{step_id}'...")
+        logger.info(f"Please review the output files in '{os.path.join(self._get_step_path(step_id), 'out')}'")
+        logger.info("Once you've reviewed the output, approve the step in the web interface or press Enter to continue.")
         
         # Mark step as waiting for input
         self._update_step_status(step_id, "waiting_input")
         
-        print(f"DEBUG: _wait_for_user_approval for '{step_id}'. os.environ.get('CI') is '{os.environ.get('CI')}'")
+        logger.debug(f"_wait_for_user_approval for '{step_id}'. os.environ.get('CI') is '{os.environ.get('CI')}'")
         # Either wait for the approval file to be created or for user input
         # Only wait for stdin if not in a CI environment
         wait_for_stdin = os.environ.get("CI") != "true"
-        print(f"DEBUG: wait_for_stdin is {wait_for_stdin}")
+        logger.debug(f"wait_for_stdin is {wait_for_stdin}")
 
         while True:
             if os.path.exists(approval_file):
@@ -215,32 +222,34 @@ class AgentBase:
         
         if not os.path.exists(step_file):
             # Create a template module file
-            with open(step_file, "w") as f:
-                f.write(f"""
-from agent.step_base import StepBase
+            with open(step_file, "w", encoding="utf-8") as f: # Added encoding
+                # Corrected f-string for the template
+                template_content = f"""from agent.step_base import StepBase
+from loguru import logger
 
 class {step_id.title().replace('_', '')}Step(StepBase):
-    \"\"\"
+    \\\"\\\"\\\"
     Implementation of the {step_id.replace('_', ' ').title()} step.
-    \"\"\"
+    \\\"\\\"\\\"
     
     def execute(self) -> bool:
-        \"\"\"
+        \\\"\\\"\\\"
         Execute the step.
         
         Returns:
             bool: True if the step was successful, False otherwise.
-        \"\"\"
+        \\\"\\\"\\\"
         # Implement your step logic here
-        self.logger.info("Executing {step_id.replace('_', ' ').title()} step")
+        logger.info(f"Executing {step_id.replace('_', ' ').title()} step")
         
         # Example: Create a sample output file
-        with open(self.get_output_path("result.txt"), "w") as f:
-            f.write("This is a sample output from the {step_id.replace('_', ' ').title()} step.\\n")
-            f.write("Edit this file to implement your own logic.\\n")
+        with open(self.get_output_path("result.txt"), "w", encoding=\\"utf-8\\") as f: # Added encoding
+            f.write("This is a sample output from the {step_id.replace('_', ' ').title()} step.\\\\n")
+            f.write("Edit this file to implement your own logic.\\\\n")
         
         return True
-""")
+"""
+                f.write(template_content)
         
         # Load the module
         spec = importlib.util.spec_from_file_location(f"agent.steps.{step_id}", step_file)
@@ -251,14 +260,14 @@ class {step_id.title().replace('_', '')}Step(StepBase):
     
     def run_step(self, step_id: str) -> bool:
         """Run a specific step"""
-        print(f"Running step: {step_id}")
+        logger.info(f"Running step: {step_id}")
         
         # Ensure step directories exist
         self._ensure_step_directories(step_id)
         
         # Check if dependencies are satisfied
         if not self._check_step_dependencies(step_id):
-            print(f"Dependencies not satisfied for step '{step_id}'")
+            logger.warning(f"Dependencies not satisfied for step '{step_id}'")
             self._update_step_status(step_id, "waiting_dependency")
             return False
         
@@ -305,7 +314,7 @@ class {step_id.title().replace('_', '')}Step(StepBase):
                 return False
         
         except Exception as e:
-            print(f"Error running step '{step_id}': {e}")
+            logger.error(f"Error running step '{step_id}': {e}")
             self._update_step_status(step_id, "failed")
             return False
     

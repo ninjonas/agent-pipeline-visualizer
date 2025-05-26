@@ -3,6 +3,7 @@ import json
 import random
 from datetime import datetime
 from agent.step_base import StepBase
+from loguru import logger
 
 class UpdateDevelopmentItemStep(StepBase):
     """
@@ -18,7 +19,7 @@ class UpdateDevelopmentItemStep(StepBase):
         Returns:
             bool: True if the step was successful, False otherwise.
         """
-        self.logger.info("Executing Update Development Item step")
+        logger.info("Executing Update Development Item step")
         
         # Read original development items from the create_development_item step
         development_items_path = os.path.join(
@@ -29,12 +30,22 @@ class UpdateDevelopmentItemStep(StepBase):
         )
         
         if not os.path.exists(development_items_path):
-            self.logger.error("Development items not found. Please run create_development_item step first.")
+            logger.error("Development items not found. Please run create_development_item step first.")
             return False
         
         # Load development items
-        with open(development_items_path, "r") as f:
-            original_items = json.load(f)
+        try:
+            with open(development_items_path, "r", encoding="utf-8") as f:
+                original_items = json.load(f)
+        except FileNotFoundError:
+            logger.error(f"Development items file not found at {development_items_path}")
+            return False
+        except json.JSONDecodeError:
+            logger.error(f"Error decoding JSON from {development_items_path}")
+            return False
+        except OSError as e:
+            logger.error(f"An OS error occurred while reading {development_items_path}: {e}")
+            return False
         
         # Generate progress data for each development item
         updated_items = self._update_development_items(original_items)
@@ -90,11 +101,11 @@ class UpdateDevelopmentItemStep(StepBase):
                     "comments": self._generate_progress_comment(item["title"], progress),
                     "last_updated": datetime.now().strftime("%Y-%m-%d"),
                     "needs_modification": needs_modification,
-                    "modification_reason": self._generate_modification_reason(item, needs_modification)
+                    "modification_reason": self._generate_modification_reason(needs_modification)
                 })
                 
                 if needs_modification:
-                    updated_item["suggested_modifications"] = self._generate_suggested_modifications(item, role)
+                    updated_item["suggested_modifications"] = self._generate_suggested_modifications(item)
                 
                 updated_member_items.append(updated_item)
             
@@ -139,7 +150,7 @@ class UpdateDevelopmentItemStep(StepBase):
             ]
         return random.choice(comments)
     
-    def _generate_modification_reason(self, item, needs_modification):
+    def _generate_modification_reason(self, needs_modification): # Removed item parameter
         """Generate a reason for modification if needed"""
         if not needs_modification:
             return None
@@ -153,7 +164,7 @@ class UpdateDevelopmentItemStep(StepBase):
         ]
         return random.choice(reasons)
     
-    def _generate_suggested_modifications(self, item, role):
+    def _generate_suggested_modifications(self, item): # Removed role parameter
         """Generate suggested modifications for a development item"""
         if "Technical Skill" in item["type"]:
             modifications = [
@@ -262,11 +273,11 @@ class UpdateDevelopmentItemStep(StepBase):
             markdown += f"**Last Updated:** {item['last_updated']}\n\n"
             
             if item["needs_modification"]:
-                markdown += f"**Needs Modification:** Yes\n\n"
+                markdown += "**Needs Modification:** Yes\n\n" # Removed f-string
                 markdown += f"**Reason:** {item['modification_reason']}\n\n"
                 markdown += f"**Suggested Modification:** {item['suggested_modifications']}\n\n"
             else:
-                markdown += f"**Needs Modification:** No\n\n"
+                markdown += "**Needs Modification:** No\n\n" # Removed f-string
         
         if member_items["needs_additional_items"] and member_items["suggested_additional_items"]:
             markdown += "## Suggested Additional Development Items\n\n"

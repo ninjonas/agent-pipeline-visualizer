@@ -6,4 +6,5 @@ export interface Step {
   requiresUserInput: boolean;
   dependencies: string[];
   group?: string;
+  message?: string; // Added optional message field
 }

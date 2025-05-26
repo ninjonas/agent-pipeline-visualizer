@@ -1,6 +1,7 @@
 import os
 import json
 from agent.step_base import StepBase
+from loguru import logger
 
 class CreateContributionGoalStep(StepBase):
     """
@@ -16,7 +17,7 @@ class CreateContributionGoalStep(StepBase):
         Returns:
             bool: True if the step was successful, False otherwise.
         """
-        self.logger.info("Executing Create Contribution Goal step")
+        logger.info("Executing Create Contribution Goal step")
         
         # Read evaluations from previous step
         evaluations_path = os.path.join(
@@ -27,11 +28,11 @@ class CreateContributionGoalStep(StepBase):
         )
         
         if not os.path.exists(evaluations_path):
-            self.logger.error("Evaluations not found. Please run evaluation_generation step first.")
+            logger.error("Evaluations not found. Please run evaluation_generation step first.")
             return False
         
         # Load evaluations
-        with open(evaluations_path, "r") as f:
+        with open(evaluations_path, "r", encoding="utf-8") as f:
             evaluations = json.load(f)
         
         # Generate contribution goals

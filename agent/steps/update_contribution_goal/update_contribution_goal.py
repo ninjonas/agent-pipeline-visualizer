@@ -3,6 +3,7 @@ import json
 import random
 from datetime import datetime
 from agent.step_base import StepBase
+from loguru import logger
 
 class UpdateContributionGoalStep(StepBase):
     """
@@ -18,7 +19,7 @@ class UpdateContributionGoalStep(StepBase):
         Returns:
             bool: True if the step was successful, False otherwise.
         """
-        self.logger.info("Executing Update Contribution Goal step")
+        logger.info("Executing Update Contribution Goal step")
         
         # Read original contribution goals from the create_contribution_goal step
         contribution_goals_path = os.path.join(
@@ -29,11 +30,11 @@ class UpdateContributionGoalStep(StepBase):
         )
         
         if not os.path.exists(contribution_goals_path):
-            self.logger.error("Contribution goals not found. Please run create_contribution_goal step first.")
+            logger.error("Contribution goals not found. Please run create_contribution_goal step first.")
             return False
         
         # Load contribution goals
-        with open(contribution_goals_path, "r") as f:
+        with open(contribution_goals_path, "r", encoding="utf-8") as f:
             original_goals = json.load(f)
         
         # Generate progress data for each goal
@@ -178,48 +179,51 @@ class UpdateContributionGoalStep(StepBase):
         elif "Infrastructure" in goal["title"] and role == "DevOps Engineer":
             return "Request temporary assistance from another DevOps engineer to overcome current blockers."
         else:
-            return f"Consider breaking down the goal into smaller milestones to make progress more manageable."
+            return "Consider breaking down the goal into smaller milestones to make progress more manageable."
     
     def _generate_updated_goals_markdown(self, goals):
         """Generate a markdown report of the updated goals for a team member"""
         member_name = goals["member_name"]
         role = goals["role"]
         
-        markdown = f"# Updated Contribution Goals for {member_name}\n\n"
-        markdown += f"**Role:** {role}\n\n"
+        markdown = f"# Updated Contribution Goals for {member_name}\\n\\n"
+        markdown += f"**Role:** {role}\\n\\n"
         
-        markdown += "## Quarterly Goals Progress\n\n"
+        markdown += "## Quarterly Goals Progress\\n\\n"
         for goal in goals["quarterly_goals"]:
-            markdown += f"### {goal['title']} - {goal['status']} ({goal['progress']}%)\n\n"
-            markdown += f"**Description:** {goal['description']}\n\n"
-            markdown += f"**Target:** {goal['target']}\n\n"
-            markdown += f"**Comments:** {goal['comments']}\n\n"
-            markdown += f"**Last Updated:** {goal['last_updated']}\n\n"
+            markdown += f"### {goal['title']} - {goal['status']} ({goal['progress']}%)\\n\\n"
+            markdown += f"**Description:** {goal['description']}\\n\\n"
+            target_display = goal.get("target", "N/A")
+            markdown += f"**Target:** {target_display}\\n\\n"
+            markdown += f"**Comments:** {goal['comments']}\\n\\n"
+            markdown += f"**Last Updated:** {goal['last_updated']}\\n\\n"
         
-        markdown += "## Key Results Progress\n\n"
+        markdown += "## Key Results Progress\\n\\n"
         for kr in goals["key_results"]:
-            markdown += f"### {kr['title']} - {kr['status']} ({kr['progress']}%)\n\n"
-            markdown += f"**Metric:** {kr['metric']}\n\n"
-            markdown += f"**Target:** {kr['target']}\n\n"
-            markdown += f"**Comments:** {kr['comments']}\n\n"
-            markdown += f"**Last Updated:** {kr['last_updated']}\n\n"
+            markdown += f"### {kr['title']} - {kr['status']} ({kr['progress']}%)\\n\\n"
+            metric_display = kr.get("metric", "N/A")
+            markdown += f"**Metric:** {metric_display}\\n\\n"
+            target_display_kr = kr.get("target", "N/A")
+            markdown += f"**Target:** {target_display_kr}\\n\\n"
+            markdown += f"**Comments:** {kr['comments']}\\n\\n"
+            markdown += f"**Last Updated:** {kr['last_updated']}\\n\\n"
         
         if goals["adjustment_needed"]:
-            markdown += "## Recommended Adjustments\n\n"
+            markdown += "## Recommended Adjustments\\n\\n"
             for rec in goals["adjustment_recommendations"]:
-                markdown += f"### {rec['goal_title']} - {rec['recommendation_type']}\n\n"
-                markdown += f"**Current Progress:** {rec['current_progress']}%\n\n"
-                markdown += f"**Recommendation:** {rec['recommendation_details']}\n\n"
-                markdown += f"**Impact Assessment:** {rec['impact_assessment']}\n\n"
+                markdown += f"### {rec['goal_title']} - {rec['recommendation_type']}\\n\\n"
+                markdown += f"**Current Progress:** {rec['current_progress']}%\\n\\n"
+                markdown += f"**Recommendation:** {rec['recommendation_details']}\\n\\n"
+                markdown += f"**Impact Assessment:** {rec['impact_assessment']}\\n\\n"
         
         return markdown
     
     def _generate_summary_markdown(self, updated_goals):
         """Generate a summary markdown report of all updated goals"""
-        markdown = "# Contribution Goals Update Summary\n\n"
+        markdown = "# Contribution Goals Update Summary\\n\\n"
         
-        markdown += f"**Date:** {datetime.now().strftime('%Y-%m-%d')}\n\n"
-        markdown += f"**Number of Team Members:** {len(updated_goals)}\n\n"
+        markdown += f"**Date:** {datetime.now().strftime('%Y-%m-%d')}\\n\\n"
+        markdown += f"**Number of Team Members:** {len(updated_goals)}\\n\\n"
         
         # Overall progress statistics
         all_goals = []
@@ -231,13 +235,13 @@ class UpdateContributionGoalStep(StepBase):
         at_risk = len([g for g in all_goals if g["status"] == "At Risk"])
         total = len(all_goals)
         
-        markdown += "## Overall Progress\n\n"
-        markdown += f"- **On Track:** {on_track} ({int(on_track/total*100)}%)\n"
-        markdown += f"- **In Progress:** {in_progress} ({int(in_progress/total*100)}%)\n"
-        markdown += f"- **At Risk:** {at_risk} ({int(at_risk/total*100)}%)\n\n"
+        markdown += "## Overall Progress\\n\\n"
+        markdown += f"- **On Track:** {on_track} ({int(on_track/total*100)}%)\\n"
+        markdown += f"- **In Progress:** {in_progress} ({int(in_progress/total*100)}%)\\n"
+        markdown += f"- **At Risk:** {at_risk} ({int(at_risk/total*100)}%)\\n\\n"
         
         # Team member summaries
-        markdown += "## Team Member Summaries\n\n"
+        markdown += "## Team Member Summaries\\n\\n"
         for goals in updated_goals:
             member_name = goals["member_name"]
             role = goals["role"]
@@ -247,10 +251,10 @@ class UpdateContributionGoalStep(StepBase):
             member_in_progress = len([g for g in member_goals if g["status"] == "In Progress"])
             member_at_risk = len([g for g in member_goals if g["status"] == "At Risk"])
             
-            markdown += f"### {member_name} ({role})\n\n"
-            markdown += f"- **Goals On Track:** {member_on_track}\n"
-            markdown += f"- **Goals In Progress:** {member_in_progress}\n"
-            markdown += f"- **Goals At Risk:** {member_at_risk}\n"
-            markdown += f"- **Adjustment Needed:** {'Yes' if goals['adjustment_needed'] else 'No'}\n\n"
+            markdown += f"### {member_name} ({role})\\n\\n"
+            markdown += f"- **Goals On Track:** {member_on_track}\\n"
+            markdown += f"- **Goals In Progress:** {member_in_progress}\\n"
+            markdown += f"- **Goals At Risk:** {member_at_risk}\\n"
+            markdown += f"- **Adjustment Needed:** {'Yes' if goals['adjustment_needed'] else 'No'}\\n\\n"
         
         return markdown

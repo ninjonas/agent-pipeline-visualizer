@@ -3,6 +3,7 @@ import json
 import random
 from datetime import datetime, timedelta
 from agent.step_base import StepBase
+from loguru import logger
 
 class TimelyFeedbackStep(StepBase):
     """
@@ -18,7 +19,7 @@ class TimelyFeedbackStep(StepBase):
         Returns:
             bool: True if the step was successful, False otherwise.
         """
-        self.logger.info("Executing Timely Feedback step")
+        logger.info("Executing Timely Feedback step")
         
         # Read team data from the data_analysis step
         team_data_path = os.path.join(
@@ -29,11 +30,11 @@ class TimelyFeedbackStep(StepBase):
         )
         
         if not os.path.exists(team_data_path):
-            self.logger.error("Team data not found. Please run data_analysis step first.")
+            logger.error("Team data not found. Please run data_analysis step first.")
             return False
         
         # Load team data
-        with open(team_data_path, "r") as f:
+        with open(team_data_path, "r", encoding="utf-8") as f:
             team_data = json.load(f)
         
         # Generate timely feedback

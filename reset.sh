@@ -16,6 +16,7 @@ echo -e "${BLUE}=========================================${NC}"
 AGENT_DIR="$(pwd)/agent"
 STEPS_DIR="$AGENT_DIR/steps"
 STATUS_FILE="$AGENT_DIR/status.json"
+LOG_DIR="$(pwd)/log" # Added log directory
 
 # Check if we're in the correct directory
 if [ ! -d "$AGENT_DIR" ]; then
@@ -74,6 +75,23 @@ for step in "${STEP_DIRS[@]}"; do
 done
 
 echo -e "${GREEN}All step output directories have been cleaned.${NC}"
+
+# Clear log files
+echo -e "${YELLOW}Clearing log files...${NC}"
+if [ -f "$LOG_DIR/agent.log" ]; then
+    > "$LOG_DIR/agent.log"
+    echo -e "Cleared agent.log.${NC}"
+else
+    echo -e "${YELLOW}Warning: agent.log not found.${NC}"
+fi
+
+if [ -f "$LOG_DIR/backend.log" ]; then
+    > "$LOG_DIR/backend.log"
+    echo -e "Cleared backend.log.${NC}"
+else
+    echo -e "${YELLOW}Warning: backend.log not found.${NC}"
+fi
+echo -e "${GREEN}Log files cleared.${NC}"
 
 # Reset the backend status if the API is running
 echo -e "${YELLOW}Attempting to reset status via API...${NC}"

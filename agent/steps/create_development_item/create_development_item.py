@@ -1,6 +1,7 @@
 import os
 import json
 from agent.step_base import StepBase
+from loguru import logger
 
 class CreateDevelopmentItemStep(StepBase):
     """
@@ -16,7 +17,7 @@ class CreateDevelopmentItemStep(StepBase):
         Returns:
             bool: True if the step was successful, False otherwise.
         """
-        self.logger.info("Executing Create Development Item step")
+        logger.info("Executing Create Development Item step")
         
         # Read evaluations from previous step
         evaluations_path = os.path.join(
@@ -27,13 +28,23 @@ class CreateDevelopmentItemStep(StepBase):
         )
         
         if not os.path.exists(evaluations_path):
-            self.logger.error("Evaluations not found. Please run evaluation_generation step first.")
+            logger.error("Evaluations not found. Please run evaluation_generation step first.")
             return False
         
         # Load evaluations
-        with open(evaluations_path, "r") as f:
-            evaluations = json.load(f)
-        
+        try:
+            with open(evaluations_path, "r", encoding="utf-8") as f: # Ensure encoding
+                evaluations = json.load(f)
+        except FileNotFoundError:
+            logger.error(f"Evaluation file not found at {evaluations_path}")
+            return False
+        except json.JSONDecodeError:
+            logger.error(f"Error decoding JSON from {evaluations_path}")
+            return False
+        except OSError as e: # Catch OS-related errors during file operations
+            logger.error(f"An OS error occurred while reading {evaluations_path}: {e}")
+            return False
+
         # Generate development items
         development_items = self._generate_development_items(evaluations)
         
@@ -68,7 +79,7 @@ class CreateDevelopmentItemStep(StepBase):
             # Generate development items based on improvement areas
             items = []
             for area in evaluation["improvement_areas"]:
-                items.extend(self._generate_items_for_area(area, role))
+                items.extend(self._generate_items_for_area(area)) # Removed role argument
             
             # Generate additional development items based on role
             items.extend(self._generate_role_specific_items(role))
@@ -86,7 +97,7 @@ class CreateDevelopmentItemStep(StepBase):
         
         return development_items
     
-    def _generate_items_for_area(self, area, role):
+    def _generate_items_for_area(self, area): # Removed role parameter
         """Generate development items for a specific improvement area"""
         items = []
         
