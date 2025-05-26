@@ -46,6 +46,9 @@ The project includes a comprehensive `run.sh` script to manage all components:
 # Run a specific agent step
 ./run.sh agent-run step data_analysis
 
+# Run frontend, backend and setup agent
+./run.sh full
+
 # Build the frontend for production
 ./run.sh build
 
@@ -59,12 +62,14 @@ The project includes a comprehensive `run.sh` script to manage all components:
 ## Agent Capabilities
 
 ### Performance Evaluation
+
 - **data_analysis**: Analyze performance data to identify trends
 - **evaluation_generation**: Generate performance evaluations
 - **create_contribution_goal**: Create measurable contribution goals
 - **create_development_item**: Create development items
 
 ### Monthly Check-ins
+
 - **update_contribution_goal**: Update goals based on progress
 - **update_development_item**: Update development items
 - **timely_feedback**: Provide feedback based on performance
@@ -72,7 +77,7 @@ The project includes a comprehensive `run.sh` script to manage all components:
 
 ## Project Structure
 
-```
+```plaintext
 agent-pipeline-visualizer/
 ├── frontend/           # Next.js frontend application
 ├── backend/            # Flask API server

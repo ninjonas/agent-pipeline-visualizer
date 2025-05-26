@@ -259,26 +259,6 @@ elif [ "$1" == "full" ]; then
   # Wait for both processes to finish
   wait
   
-# websocket command now redirects to dev since dev has WebSocket support by default
-elif [ "$1" == "websocket" ]; then
-  echo -e "${YELLOW}Note: The 'websocket' command is now deprecated, as WebSocket support is enabled by default in 'dev' mode.${NC}"
-  echo -e "${GREEN}Running 'dev' mode with WebSocket support...${NC}"
-  
-  # Just call the dev command logic
-  kill_ports
-  run_frontend "websocket"
-  run_backend "websocket"
-  
-  echo -e "${GREEN}Servers are running with WebSocket support. Press Ctrl+C to stop both.${NC}"
-  echo -e "${BLUE}Access the agent dashboard at http://localhost:3000/agent${NC}"
-  echo -e "${YELLOW}To run the agent demo in another terminal:${NC}"
-  echo -e "  ${YELLOW}./run.sh agent-run step${NC}"
-  
-  # Trap to catch Ctrl+C and kill both processes
-  trap 'echo -e "${YELLOW}Gracefully shutting down servers...${NC}"; kill -TERM $FRONTEND_PID $BACKEND_PID 2>/dev/null; sleep 1; if ps -p $BACKEND_PID > /dev/null; then kill -9 $BACKEND_PID 2>/dev/null; fi; echo -e "${RED}Servers stopped.${NC}"; exit 0' INT TERM
-  # Wait for both processes to finish
-  wait
-
 elif [ "$1" == "kill" ]; then
   # Just kill processes on ports 3000 and 4000
   echo -e "${BLUE}=========================================${NC}"
@@ -296,7 +276,6 @@ elif [ "$1" == "help" ] || [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
   
   echo -e "${GREEN}Server Management:${NC}"
   echo -e "  ${YELLOW}./run.sh dev${NC}         - Run frontend and backend in development mode with WebSocket support"
-  echo -e "  ${YELLOW}./run.sh websocket${NC}   - (Deprecated, same as 'dev') Run with WebSocket support"
   echo -e "  ${YELLOW}./run.sh full${NC}        - Run frontend, backend and setup agent"
   echo -e "  ${YELLOW}./run.sh build${NC}       - Build the frontend for production"
   echo -e "  ${YELLOW}./run.sh kill${NC}        - Kill any processes running on ports 3000 and 4000"
