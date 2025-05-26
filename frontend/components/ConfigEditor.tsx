@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { CONFIG_EDITOR_STRINGS } from '../utils/constants';
 
 interface ConfigEditorProps {
   config: any;
@@ -67,13 +68,13 @@ export function ConfigEditor({ config, stepGroups, isLoading, onSave }: ConfigEd
                             onChange={(e) => handleStepChange(stepIndex, 'requiresUserInput', e.target.checked)}
                             className="rounded border-gray-300 text-primary-600 focus:ring-primary-500 h-4 w-4"
                           />
-                          <span className="ml-2 text-sm text-gray-700">Requires User Input</span>
+                          <span className="ml-2 text-sm text-gray-700">{CONFIG_EDITOR_STRINGS.REQUIRES_USER_INPUT}</span>
                         </label>
                       </div>
                     </div>
                     
                     <div>
-                      <h5 className="text-sm font-medium mb-2">Dependencies:</h5>
+                      <h5 className="text-sm font-medium mb-2">{CONFIG_EDITOR_STRINGS.DEPENDENCIES}</h5>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                         {editedConfig.steps
                           .filter((s: any) => s.id !== step.id)
@@ -103,7 +104,7 @@ export function ConfigEditor({ config, stepGroups, isLoading, onSave }: ConfigEd
           disabled={isLoading}
           className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors disabled:bg-gray-400"
         >
-          {isLoading ? 'Saving...' : 'Save Configuration'}
+          {isLoading ? CONFIG_EDITOR_STRINGS.SAVING : CONFIG_EDITOR_STRINGS.SAVE_CONFIGURATION}
         </button>
       </div>
     </div>

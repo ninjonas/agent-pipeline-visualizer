@@ -151,6 +151,7 @@ class TimelyFeedbackStep(StepBase):
                 feature=random.choice(["user authentication", "data visualization", "reporting module", "search functionality", "notification system"]),
                 component=random.choice(["backend services", "frontend components", "database layer", "API endpoints", "authentication system"]),
                 architecture=random.choice(["microservice architecture", "event-driven system", "caching layer", "data pipeline", "serverless functions"]),
+                need=random.choice(["scalability", "high availability", "real-time processing", "data integrity", "future growth"]), # Added "need"
                 area=random.choice(["user behavior", "performance bottlenecks", "customer preferences", "market trends", "system integration"]),
                 deliverable=random.choice(["wireframes", "prototypes", "user flow diagrams", "style guide", "interaction models"]),
                 model=random.choice(["prediction algorithm", "classification model", "recommendation system", "anomaly detection", "time series forecast"]),

@@ -1,3 +1,5 @@
+import { AGENT_STATUS_STRINGS } from '../utils/constants';
+
 interface AgentStatusProps {
   steps: Array<{
     id: string;
@@ -10,7 +12,7 @@ export function AgentStatus({ steps, loading }: AgentStatusProps) {
   if (loading) {
     return (
       <div className="bg-white rounded-lg shadow-sm p-4 flex justify-center">
-        <div className="text-gray-500">Loading agent status...</div>
+        <div className="text-gray-500">{AGENT_STATUS_STRINGS.LOADING}</div>
       </div>
     );
   }
@@ -24,9 +26,9 @@ export function AgentStatus({ steps, loading }: AgentStatusProps) {
   return (
     <div className="bg-white rounded-lg shadow-sm p-6">
       <div className="flex flex-wrap items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-gray-800">Agent Status</h2>
+        <h2 className="text-xl font-semibold text-gray-800">{AGENT_STATUS_STRINGS.AGENT_STATUS_TITLE}</h2>
         <span className="text-sm font-medium text-gray-500">
-          {completedSteps} of {totalSteps} steps completed ({progress}%)
+          {completedSteps} of {totalSteps} {AGENT_STATUS_STRINGS.STEPS_COMPLETED} ({progress}%)
         </span>
       </div>
 
@@ -40,15 +42,15 @@ export function AgentStatus({ steps, loading }: AgentStatusProps) {
       <div className="grid grid-cols-3 gap-4 text-center">
         <div className="p-3 bg-blue-50 rounded-lg">
           <div className="text-2xl font-bold text-blue-600">{inProgressSteps}</div>
-          <div className="text-sm text-gray-600">In Progress</div>
+          <div className="text-sm text-gray-600">{AGENT_STATUS_STRINGS.IN_PROGRESS}</div>
         </div>
         <div className="p-3 bg-green-50 rounded-lg">
           <div className="text-2xl font-bold text-green-600">{completedSteps}</div>
-          <div className="text-sm text-gray-600">Completed</div>
+          <div className="text-sm text-gray-600">{AGENT_STATUS_STRINGS.COMPLETED}</div>
         </div>
         <div className="p-3 bg-gray-50 rounded-lg">
           <div className="text-2xl font-bold text-gray-600">{pendingSteps}</div>
-          <div className="text-sm text-gray-600">Pending</div>
+          <div className="text-sm text-gray-600">{AGENT_STATUS_STRINGS.PENDING}</div>
         </div>
       </div>
     </div>

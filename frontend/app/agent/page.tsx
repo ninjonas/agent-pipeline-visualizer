@@ -175,7 +175,7 @@ export default function AgentDashboard() {
       <AgentStatus steps={steps} loading={loading} />
       
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
-        <div className="lg:col-span-1 space-y-6">
+        <div className="lg:col-span-1 space-y-6 overflow-y-auto max-h-[calc(100vh-12rem)]">
           {STEP_GROUPS.map((group) => (
             <div key={group.id} className="bg-white rounded-lg shadow-sm p-4">
               <h2 className="text-xl font-semibold mb-3 text-primary-600">{group.name}</h2>

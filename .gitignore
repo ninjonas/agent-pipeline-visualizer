@@ -50,3 +50,4 @@ out/
 agent/steps/*/out/
 
 *.log
+status.json
