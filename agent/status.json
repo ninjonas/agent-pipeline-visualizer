@@ -1,5 +1,14 @@
 {
   "data_analysis": {
     "status": "completed"
+  },
+  "evaluation_generation": {
+    "status": "completed"
+  },
+  "create_contribution_goal": {
+    "status": "completed"
+  },
+  "create_development_item": {
+    "status": "waiting_input"
   }
 }

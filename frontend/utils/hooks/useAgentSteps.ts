@@ -11,6 +11,14 @@ export function useAgentSteps() {
   const [runningStep, setRunningStep] = useState<string | null>(null);
   const { addToast } = useToast();
 
+  const optimisticallyUpdateStepStatus = useCallback((stepId: string, newStatus: Step['status']) => {
+    setSteps(prevSteps =>
+      prevSteps.map(step =>
+        step.id === stepId ? { ...step, status: newStatus } : step
+      )
+    );
+  }, [setSteps]);
+
   const refreshSteps = useCallback(async (): Promise<Step[]> => {
     let fetchedSteps: Step[] = [];
     // setLoading(true); // Consider if this is needed on every refresh or just initial
@@ -145,5 +153,6 @@ export function useAgentSteps() {
     updateStepOutput,
     runStep,
     runningStep,
+    optimisticallyUpdateStepStatus, // Add this
   };
 }

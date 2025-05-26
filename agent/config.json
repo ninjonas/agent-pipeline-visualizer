@@ -12,7 +12,7 @@
       "id": "evaluation_generation",
       "name": "Evaluation Generation",
       "description": "Generate performance evaluations based on the analysis of data and feedback.",
-      "requiresUserInput": true,
+      "requiresUserInput": false,
       "dependencies": [
         "data_analysis"
       ],
@@ -22,7 +22,7 @@
       "id": "create_contribution_goal",
       "name": "Create Contribution Goal",
       "description": "Create specific, measurable contribution goals for team members based on performance data.",
-      "requiresUserInput": true,
+      "requiresUserInput": false,
       "dependencies": [
         "evaluation_generation"
       ],
@@ -32,7 +32,7 @@
       "id": "create_development_item",
       "name": "Create Development Item",
       "description": "Create development items to help team members improve their skills and performance.",
-      "requiresUserInput": true,
+      "requiresUserInput": false,
       "dependencies": [
         "evaluation_generation"
       ],
@@ -42,7 +42,7 @@
       "id": "update_contribution_goal",
       "name": "Update Contribution Goal",
       "description": "Update contribution goals based on the progress made by team members.",
-      "requiresUserInput": true,
+      "requiresUserInput": false,
       "dependencies": [
         "create_contribution_goal"
       ],
@@ -52,7 +52,7 @@
       "id": "update_development_item",
       "name": "Update Development Item",
       "description": "Update development items based on the progress made by team members.",
-      "requiresUserInput": true,
+      "requiresUserInput": false,
       "dependencies": [
         "create_development_item"
       ],
@@ -62,7 +62,7 @@
       "id": "timely_feedback",
       "name": "Timely Feedback",
       "description": "Provide timely feedback to team members based on their performance and progress.",
-      "requiresUserInput": true,
+      "requiresUserInput": false,
       "dependencies": [
         "update_contribution_goal",
         "update_development_item"

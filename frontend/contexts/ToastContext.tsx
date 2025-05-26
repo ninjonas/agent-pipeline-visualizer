@@ -16,11 +16,14 @@ interface ToastContextProps {
 
 const ToastContext = createContext<ToastContextProps | undefined>(undefined);
 
+let toastIdCounter = 0; // Add a counter for unique IDs
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   const addToast = (message: string, type: 'success' | 'error' | 'info') => {
-    const id = Date.now().toString();
+    // const id = Date.now().toString(); // Old problematic ID generation
+    const id = `toast-${toastIdCounter++}`; // New unique ID generation
     setToasts((prev) => [...prev, { id, message, type }]);
   };
 

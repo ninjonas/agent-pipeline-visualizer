@@ -10,7 +10,7 @@ import { Step } from '@/types/agent';
 import { useToast } from '@/contexts/ToastContext';
 
 export default function AgentDashboard() {
-  const { steps, loading, error, refreshSteps, updateStepOutput, runStep, runningStep } = useAgentSteps();
+  const { steps, loading, error, refreshSteps, updateStepOutput, runStep, runningStep, optimisticallyUpdateStepStatus } = useAgentSteps();
   const [selectedStep, setSelectedStep] = useState<Step | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [filesForSelectedStep, setFilesForSelectedStep] = useState<string[]>([]); // New state for files
@@ -54,6 +54,28 @@ export default function AgentDashboard() {
           console.error("Approved step configuration not found for id:", stepId);
           return;
         }
+
+        // Optimistic UI Update for dependent steps
+        AGENT_STEPS.forEach(potentialNextStepConfig => {
+          if (potentialNextStepConfig.dependencies.includes(stepId)) {
+            // This step depends on the one just approved.
+            const dependentStepData = currentStepsState.find(s => s.id === potentialNextStepConfig.id);
+            if (dependentStepData && (dependentStepData.status === 'pending' || dependentStepData.status === 'waiting_dependency')) {
+              // Check if all *other* dependencies for this dependent step are met
+              const allOtherDependenciesMet = potentialNextStepConfig.dependencies
+                .filter(dep => dep !== stepId) // Exclude the just-approved step
+                .every(depId => {
+                  const depStepData = currentStepsState.find(s => s.id === depId);
+                  return depStepData && depStepData.status === 'completed';
+                });
+
+              if (allOtherDependenciesMet) {
+                addToast(`Optimistically setting "${potentialNextStepConfig.name}" to running.`, 'info');
+                optimisticallyUpdateStepStatus(potentialNextStepConfig.id, 'in_progress'); 
+              }
+            }
+          }
+        });
 
         // Iterate through all potential next steps to see if they can be run
         for (const potentialNextStepConfig of AGENT_STEPS) {
