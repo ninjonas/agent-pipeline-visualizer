@@ -259,11 +259,6 @@ def _update_status_json_locked(step_id_to_update, new_status_value, is_approval=
         return False # Indicate failure due to exception
 
 # API routes
-@app.route('/api/status', methods=['GET'])
-def api_status():
-    """API status endpoint"""
-    return jsonify({"status": "ok"})
-
 @app.route('/api/config', methods=['GET', 'POST'])
 def api_config():
     """Get or update agent configuration"""
@@ -469,35 +464,6 @@ def api_files():
             return jsonify({"status": "success"})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
-
-@app.route('/api/reset', methods=['POST'])
-def api_reset():
-    """Reset the agent pipeline by clearing status and output files"""
-    try:
-        # Reset status
-        status_file = os.path.join(AGENT_DIR, 'status.json')
-        with status_json_lock: # Acquire lock
-            with open(status_file, 'w') as f:
-                json.dump({}, f)
-        
-        # Clear output files for all steps (no lock needed for these distinct files)
-        step_dirs = [
-            'data_analysis', 'evaluation_generation', 'create_contribution_goal', 
-            'create_development_item', 'update_contribution_goal', 'update_development_item',
-            'timely_feedback', 'coaching'
-        ]
-        
-        for step in step_dirs:
-            step_out_dir = os.path.join(STEPS_DIR, step, 'out')
-            if os.path.exists(step_out_dir):
-                for item in os.listdir(step_out_dir):
-                    item_path = os.path.join(step_out_dir, item)
-                    if os.path.isfile(item_path):
-                        os.remove(item_path)
-        
-        return jsonify({"status": "success", "message": "Pipeline reset successfully"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 # Start the server
 if __name__ == '__main__':
