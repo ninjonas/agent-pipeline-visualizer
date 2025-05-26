@@ -13,6 +13,7 @@ export default function AgentDashboard() {
   const { steps, loading, error, refreshSteps, updateStepOutput, runStep, runningStep } = useAgentSteps();
   const [selectedStep, setSelectedStep] = useState<Step | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [filesForSelectedStep, setFilesForSelectedStep] = useState<string[]>([]); // New state for files
   const { addToast } = useToast();
 
   useEffect(() => {
@@ -32,75 +33,119 @@ export default function AgentDashboard() {
     setSelectedFile(filePath);
   };
 
+  const handleFilesLoaded = (loadedFiles: string[]) => { // Handler for when files are loaded by FileViewer
+    setFilesForSelectedStep(loadedFiles);
+  };
+
   const handleApproveStep = async (stepId: string) => {
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/api/steps/${stepId}/approve`, {
         method: 'POST',
       });
-      
+
       if (response.ok) {
-        const stepName = AGENT_STEPS.find(s => s.id === stepId)?.name || stepId;
-        addToast(`Step "${stepName}" approved successfully`, 'success');
-        
-        // Refresh steps to get the latest status
-        await refreshSteps();
-        
-        // Find and select the next available step
-        const currentStepIndex = AGENT_STEPS.findIndex(s => s.id === stepId);
-        if (currentStepIndex >= 0 && currentStepIndex < AGENT_STEPS.length - 1) {
-          // Look for the next step that's ready to run
-          for (let i = currentStepIndex + 1; i < AGENT_STEPS.length; i++) {
-            const nextStep = AGENT_STEPS[i];
-            const nextStepData = steps.find(s => s.id === nextStep.id);
-            
-            // Check if the next step is ready to run (either waiting for input or in_progress)
-            if (nextStepData && 
-                (nextStepData.status === 'waiting_input' || 
-                 nextStepData.status === 'in_progress')) {
-              // Select this step
-              const stepToSelect = {
-                ...nextStepData,
-                name: nextStep.name,
-                description: nextStep.description,
-                requiresUserInput: nextStep.requiresUserInput,
-                dependencies: nextStep.dependencies,
-              };
-              setSelectedStep(stepToSelect);
-              setSelectedFile(null);
-              addToast(`Moved to next step: ${nextStep.name}`, 'info');
-              break;
+        const stepConfig = AGENT_STEPS.find(s => s.id === stepId);
+        const stepName = stepConfig?.name || stepId;
+        addToast(`Step "${stepName}" approved successfully. Checking for dependent steps.`, 'success');
+
+        let currentStepsState = await refreshSteps(); // Ensure we have the latest state after approval
+
+        if (!stepConfig) {
+          console.error("Approved step configuration not found for id:", stepId);
+          return;
+        }
+
+        // Iterate through all potential next steps to see if they can be run
+        for (const potentialNextStepConfig of AGENT_STEPS) {
+          // Find the current data for this potential next step
+          const stepData = currentStepsState.find(s => s.id === potentialNextStepConfig.id);
+
+          if (stepData && (stepData.status === 'pending' || stepData.status === 'waiting_dependency')) {
+            const dependenciesMet = potentialNextStepConfig.dependencies.every(depId => {
+              const depStepData = currentStepsState.find(s => s.id === depId);
+              return depStepData && depStepData.status === 'completed';
+            });
+
+            if (dependenciesMet) {
+              // Toasting for the outcome of the run is now handled by the runStep hook
+              const runResult = await handleRunStep(potentialNextStepConfig.id);
+              currentStepsState = runResult.updatedSteps; // Update currentStepsState for subsequent checks
             }
           }
         }
+
+        // UI update logic for selecting next step to focus on
+        const currentApprovedStepIndex = AGENT_STEPS.findIndex(s => s.id === stepId);
+        if (currentApprovedStepIndex >= 0) {
+          let nextStepToSelect = null;
+          // Try to find the next step that is not yet completed and is actionable
+          for (let i = 0; i < AGENT_STEPS.length; i++) {
+            const config = AGENT_STEPS[i];
+            const data = currentStepsState.find(s => s.id === config.id);
+            if (data && data.status !== 'completed' && 
+                (data.status === 'waiting_input' || data.status === 'in_progress' || data.status === 'pending' || data.status === 'failed')) {
+              nextStepToSelect = {
+                ...data, // Use the latest data from currentStepsState
+                name: config.name,
+                description: config.description,
+                requiresUserInput: config.requiresUserInput,
+                dependencies: config.dependencies,
+              };
+              break; 
+            }
+          }
+          if (nextStepToSelect) {
+            setSelectedStep(nextStepToSelect);
+            setSelectedFile(null); // Reset file view when step selection changes
+          } else {
+            addToast('All steps are completed or no further actions pending.', 'success');
+            setSelectedStep(null); 
+          }
+        }
+
       } else {
-        addToast(`Failed to approve step`, 'error');
-        console.error('Failed to approve step');
+        const errorText = await response.text();
+        const stepName = AGENT_STEPS.find(s => s.id === stepId)?.name || stepId;
+        addToast(`Failed to approve step "${stepName}": ${response.status} ${errorText}`, 'error');
+        console.error('Failed to approve step:', errorText);
       }
-    } catch (error) {
-      console.error('Error approving step:', error);
-      addToast(`Error approving step: ${error}`, 'error');
+    } catch (error: any) {
+      const stepName = AGENT_STEPS.find(s => s.id === stepId)?.name || stepId;
+      console.error(`Error approving step "${stepName}":`, error);
+      addToast(`Error approving step "${stepName}": ${error.message}`, 'error');
     }
   };
 
-  const handleRunStep = async (stepId: string) => {
-    const stepName = AGENT_STEPS.find(s => s.id === stepId)?.name || stepId;
-    const success = await runStep(stepId);
+  const handleRunStep = async (stepId: string): Promise<{ success: boolean, updatedSteps: Step[] }> => {
+    // Most toasting is now handled by the runStep hook.
+    const result = await runStep(stepId); 
     
-    if (success) {
-      // Select the step that was just run
-      const step = AGENT_STEPS.find(s => s.id === stepId);
-      if (step) {
-        const stepData = steps.find(s => s.id === stepId);
-        const stepToSelect = {
-          ...step,
-          status: stepData?.status || 'in_progress',
-          requiresUserInput: step.requiresUserInput,
-          dependencies: step.dependencies,
-        };
-        setSelectedStep(stepToSelect);
+    // Update the selected step details if it's the one that was run
+    const stepConfig = AGENT_STEPS.find(s => s.id === stepId);
+    const stepData = result.updatedSteps.find(s => s.id === stepId);
+
+    if (selectedStep?.id === stepId && stepConfig && stepData) {
+        setSelectedStep({
+            ...stepData,
+            name: stepConfig.name,
+            description: stepConfig.description,
+            requiresUserInput: stepConfig.requiresUserInput,
+            dependencies: stepConfig.dependencies,
+        });
+        setSelectedFile(null); // Reset file view as step state changed
+    } else if (stepData && stepData.status === 'waiting_input' && !selectedStep) {
+        // If no step is selected, and a step just went to waiting_input, select it.
+         setSelectedStep({
+            ...stepData,
+            name: stepConfig?.name || stepId,
+            description: stepConfig?.description || '',
+            requiresUserInput: stepConfig?.requiresUserInput || false,
+            dependencies: stepConfig?.dependencies || [],
+        });
         setSelectedFile(null);
-      }
     }
+    
+    return result;
   };
 
   return (
@@ -134,6 +179,7 @@ export default function AgentDashboard() {
                       onRunStep={handleRunStep}
                       isRunning={runningStep === step.id}
                       completedSteps={steps.filter(s => s.status === 'completed').map(s => s.id)}
+                      hasFilesForReview={selectedStep?.id === step.id && filesForSelectedStep.length > 0} // Pass hasFilesForReview
                     />
                   );
                 })}
@@ -164,6 +210,7 @@ export default function AgentDashboard() {
                 selectedFile={selectedFile}
                 onFileSelect={handleFileSelect}
                 onSaveContent={updateStepOutput}
+                onFilesLoaded={handleFilesLoaded} // Pass the handler to FileViewer
               />
 
               {selectedStep.requiresUserInput && selectedStep.status === 'waiting_input' && (

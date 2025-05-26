@@ -6,9 +6,10 @@ interface FileViewerProps {
   selectedFile: string | null;
   onFileSelect: (filePath: string) => void;
   onSaveContent: (stepId: string, filePath: string, content: string) => Promise<boolean>;
+  onFilesLoaded?: (files: string[]) => void; // Added callback for when files are loaded
 }
 
-export function FileViewer({ stepId, selectedFile, onFileSelect, onSaveContent }: FileViewerProps) {
+export function FileViewer({ stepId, selectedFile, onFileSelect, onSaveContent, onFilesLoaded }: FileViewerProps) {
   const [files, setFiles] = useState<string[]>([]);
   const [fileContent, setFileContent] = useState<string>('');
   const [isEditing, setIsEditing] = useState(false);
@@ -38,13 +39,23 @@ export function FileViewer({ stepId, selectedFile, onFileSelect, onSaveContent }
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/api/steps/${stepId}/files`);
       if (response.ok) {
         const data = await response.json();
-        setFiles(data.files || []);
+        const fetchedFiles = data.files || [];
+        setFiles(fetchedFiles);
+        if (onFilesLoaded) { // Call the callback
+          onFilesLoaded(fetchedFiles);
+        }
       } else {
         addToast('Failed to fetch step files', 'error');
+        if (onFilesLoaded) { // Also call with empty array on failure if desired
+          onFilesLoaded([]);
+        }
       }
     } catch (error) {
       console.error('Error fetching step files:', error);
       addToast('Error fetching step files', 'error');
+      if (onFilesLoaded) { // Also call with empty array on error
+        onFilesLoaded([]);
+      }
     } finally {
       setIsLoading(false);
     }

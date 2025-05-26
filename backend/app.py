@@ -257,44 +257,56 @@ def api_approve_step(step_id):
 def api_run_step(step_id):
     """Run a specific step"""
     try:
-        # Import the necessary modules to run a step
+        # Ensure the parent directory of 'agent' is in sys.path
+        # to allow imports like 'from agent.agent_base import AgentBase'
         import sys
-        sys.path.append(AGENT_DIR)
-        
-        # Check if the step exists
-        steps = get_step_status()
-        step = next((s for s in steps if s['id'] == step_id), None)
+        # AGENT_DIR is defined as os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'agent'))
+        # We need its parent in sys.path for 'import agent.agent_base'
+        # or AGENT_DIR itself if we are doing 'from agent_base import AgentBase'
+        # Let's add the parent of AGENT_DIR to sys.path to be safe for package imports.
+        agent_parent_dir = os.path.abspath(os.path.join(AGENT_DIR, '..'))
+        if agent_parent_dir not in sys.path:
+            sys.path.insert(0, agent_parent_dir) # Insert at the beginning for priority
+
+        from agent.agent_base import AgentBase # Try importing as part of the 'agent' package
+
+        current_steps_status = get_step_status()
+        step = next((s for s in current_steps_status if s['id'] == step_id), None)
         
         if not step:
-            return jsonify({"status": "error", "error": f"Step {step_id} not found"}), 404
+            return jsonify({"status": "error", "error": f"Step {step_id} not found", "steps": current_steps_status}), 404
         
-        # Check if dependencies are satisfied
         for dep_id in step['dependencies']:
-            dep_step = next((s for s in steps if s['id'] == dep_id), None)
+            dep_step = next((s for s in current_steps_status if s['id'] == dep_id), None)
             if not dep_step or dep_step['status'] != 'completed':
                 return jsonify({
                     "status": "error", 
-                    "error": f"Step {step_id} has unsatisfied dependencies: {dep_id} is not completed"
+                    "error": f"Step {step_id} has unsatisfied dependencies: {dep_id} is not completed",
+                    "steps": current_steps_status
                 }), 400
         
-        from agent_base import AgentBase
-        
-        # Create agent instance
         agent = AgentBase()
+        agent.run_step(step_id)
         
-        # Run the step
-        success = agent.run_step(step_id)
-        
-        if success:
-            return jsonify({"status": "success", "message": f"Step {step_id} completed successfully"})
+        updated_steps_status = get_step_status()
+        final_step_state = next((s for s in updated_steps_status if s['id'] == step_id), None)
+
+        if final_step_state and final_step_state['status'] not in ['failed', 'pending', 'waiting_dependency']:
+            return jsonify({"status": "success", "message": f"Step {step_id} processed.", "steps": updated_steps_status})
         else:
-            return jsonify({"status": "error", "error": f"Step {step_id} failed to complete"}), 500
+            error_message = f"Step {step_id} may have failed or is in an unexpected state: {final_step_state['status'] if final_step_state else 'unknown'}"
+            return jsonify({"status": "error", "error": error_message, "steps": updated_steps_status}), 500
+
     except ImportError as e:
-        print(f"Error importing modules: {e}")
-        return jsonify({"status": "error", "error": f"Server configuration error: {str(e)}"}), 500
+        print(f"ImportError in api_run_step for {step_id}: {e}")
+        print(f"Current sys.path: {sys.path}")
+        print(f"AGENT_DIR: {AGENT_DIR}")
+        current_steps_status_on_error = get_step_status() if 'current_steps_status' in locals() else []
+        return jsonify({"status": "error", "error": f"Server configuration error (ImportError): {str(e)}", "steps": current_steps_status_on_error}), 500
     except Exception as e:
-        print(f"Error running step: {e}")
-        return jsonify({"status": "error", "error": str(e)}), 500
+        print(f"Error running step {step_id}: {e}")
+        current_steps_status_on_error = get_step_status() if 'current_steps_status' in locals() else []
+        return jsonify({"status": "error", "error": str(e), "steps": current_steps_status_on_error}), 500
 
 @app.route('/api/files', methods=['GET', 'POST'])
 def api_files():

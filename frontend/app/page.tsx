@@ -40,6 +40,7 @@ export default function Home() {
           <ol className="text-left list-decimal pl-6 space-y-2">
             <li>View the agent dashboard to monitor step status</li>
             <li>Start the agent using <code className="bg-gray-100 px-2 py-1 rounded">./run.sh agent-run step</code></li>
+            <li>Wait for the agent run to complete and files to be generated</li>
             <li>Review and approve generated files in each step</li>
             <li>Configure steps and dependencies as needed</li>
           </ol>

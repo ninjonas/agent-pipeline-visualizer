@@ -7,10 +7,11 @@ interface StepCardProps {
   onApprove: (stepId: string) => void;
   onRunStep?: (stepId: string) => void;
   isRunning?: boolean;
-  completedSteps: string[]; // Add this to track which steps are completed
+  completedSteps: string[];
+  hasFilesForReview?: boolean; // Added to indicate if files are ready for review
 }
 
-export function StepCard({ step, isSelected, onClick, onApprove, onRunStep, isRunning = false, completedSteps = [] }: StepCardProps) {
+export function StepCard({ step, isSelected, onClick, onApprove, onRunStep, isRunning = false, completedSteps = [], hasFilesForReview = false }: StepCardProps) {
   const statusColors = {
     pending: 'bg-gray-100 text-gray-800',
     waiting_dependency: 'bg-purple-100 text-purple-800',
@@ -26,6 +27,8 @@ export function StepCard({ step, isSelected, onClick, onApprove, onRunStep, isRu
   const canRun = step.dependencies.length === 0 || 
                 step.dependencies.every(depId => completedSteps.includes(depId));
   
+  // Determine if the approve button should be enabled
+  const canApprove = step.status === 'waiting_input' && hasFilesForReview;
   
   return (
     <div 
@@ -64,11 +67,18 @@ export function StepCard({ step, isSelected, onClick, onApprove, onRunStep, isRu
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onApprove(step.id);
+            // Ensure onApprove is only called if the button is truly enabled,
+            // though the disabled attribute should prevent this.
+            if (canApprove) {
+              onApprove(step.id);
+            }
           }}
-          className="mt-3 w-full px-3 py-1.5 bg-primary-600 text-white text-xs rounded hover:bg-primary-700 transition-colors"
+          disabled={!canApprove} // Disable button if not ready for approval
+          className={`mt-3 w-full px-3 py-1.5 text-white text-xs rounded transition-colors ${
+            canApprove ? 'bg-primary-600 hover:bg-primary-700' : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+          }`}
         >
-          Approve & Continue
+          {hasFilesForReview ? 'Approve & Continue' : 'Waiting for Files'}
         </button>
       )}
       

@@ -184,20 +184,30 @@ class AgentBase:
         # Mark step as waiting for input
         self._update_step_status(step_id, "waiting_input")
         
+        print(f"DEBUG: _wait_for_user_approval for '{step_id}'. os.environ.get('CI') is '{os.environ.get('CI')}'")
         # Either wait for the approval file to be created or for user input
+        # Only wait for stdin if not in a CI environment
+        wait_for_stdin = os.environ.get("CI") != "true"
+        print(f"DEBUG: wait_for_stdin is {wait_for_stdin}")
+
         while True:
             if os.path.exists(approval_file):
                 os.remove(approval_file)
                 return True
             
-            # Check for user input (non-blocking)
-            import select
-            import sys
-            
-            # Check if there's input available (with a timeout)
-            if select.select([sys.stdin], [], [], 1.0)[0]:
-                input()  # Consume the input
-                return True
+            # Check for user input (non-blocking) if allowed
+            if wait_for_stdin:
+                import select
+                import sys
+                
+                # Check if there's input available (with a timeout)
+                if select.select([sys.stdin], [], [], 1.0)[0]:
+                    input()  # Consume the input
+                    return True
+            else:
+                # If not waiting for stdin (e.g., in CI mode), just sleep briefly
+                # to avoid busy-waiting, relying on the approval file.
+                time.sleep(1)
     
     def _load_step_module(self, step_id: str) -> Any:
         """Load the Python module for a step"""

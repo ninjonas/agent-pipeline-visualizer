@@ -101,29 +101,34 @@ run_backend() {
   echo -e "${YELLOW}Setting up Flask backend...${NC}"
   cd "$BACKEND_DIR"
   
-  # Check if virtual environment exists, if not create it
+  # Create a virtual environment if it doesn't exist
   if [ ! -d "venv" ]; then
-    echo -e "${BLUE}Creating virtual environment for backend...${NC}"
-    python -m venv venv
+    echo -e "${YELLOW}Creating virtual environment for backend...${NC}"
+    python3 -m venv venv
+    echo -e "${GREEN}Backend virtual environment created.${NC}"
   fi
   
+  # Activate virtual environment
+  echo -e "${YELLOW}Activating backend virtual environment...${NC}"
   source venv/bin/activate
   
-  # Install all dependencies
-  echo -e "${YELLOW}Installing backend dependencies...${NC}"
+  # Install dependencies
+  echo -e "${YELLOW}Installing backend dependencies from requirements.txt...${NC}"
   pip install -r requirements.txt
-  echo -e "${GREEN}Backend dependencies installed${NC}"
+  echo -e "${GREEN}Backend dependencies installed.${NC}"
   
-  # Install WebSocket dependencies if in websocket mode
+  # Install Flask-SocketIO if in websocket mode
   if [ "$websocket_mode" == "websocket" ]; then
-    echo -e "${YELLOW}Installing WebSocket dependencies...${NC}"
-    pip install flask-socketio python-socketio python-engineio
-    echo -e "${GREEN}WebSocket dependencies installed${NC}"
+    echo -e "${YELLOW}Installing Flask-SocketIO...${NC}"
+    pip install flask-socketio
+    echo -e "${GREEN}Flask-SocketIO installed.${NC}"
   fi
   
   echo -e "${YELLOW}Starting Flask backend...${NC}"
   # Use -u for unbuffered output to prevent issues with SIGINT handling
-  PYTHONUNBUFFERED=1 exec python app.py &
+  # Add project root to PYTHONPATH
+  # Use env to ensure CI variable is set for the python process
+  env CI=true PYTHONPATH="${BACKEND_DIR}/..:$PYTHONPATH" PYTHONUNBUFFERED=1 python app.py &
   BACKEND_PID=$!
   
   if [ "$websocket_mode" == "websocket" ]; then
@@ -156,20 +161,33 @@ setup_agent() {
 
 # Function to run agent
 run_agent() {
-  local mode=$1
-  local step=$2
-  local api_url="http://localhost:4000"
+  local agent_name=${1:-"default_agent"} # Default agent name
+  local websocket_mode=${2:-"no"} # Default to no websocket mode
   
-  setup_agent
-  
-  # Check if the backend is running
-  if ! curl -s "$api_url/api/status" > /dev/null; then
-    echo -e "${RED}Warning: Backend API is not accessible at $api_url${NC}"
-    echo -e "${YELLOW}The agent will run in offline mode and won't connect to the visualizer.${NC}"
-    echo -e "${BLUE}Consider running './run.sh dev' in another terminal first.${NC}"
-    sleep 2
-  else
-    echo -e "${GREEN}Backend API is available. Agent will connect to the visualizer.${NC}"
+  echo -e "${YELLOW}Setting up Python agent ($agent_name)...${NC}"
+  cd "$AGENT_DIR"
+
+  # Create a virtual environment if it doesn't exist
+  if [ ! -d "venv" ]; then
+    echo -e "${YELLOW}Creating virtual environment for agent...${NC}"
+    python3 -m venv venv
+    echo -e "${GREEN}Agent virtual environment created.${NC}"
+  fi
+
+  # Activate virtual environment
+  echo -e "${YELLOW}Activating agent virtual environment...${NC}"
+  source venv/bin/activate
+
+  # Install dependencies
+  echo -e "${YELLOW}Installing agent dependencies from requirements.txt...${NC}"
+  pip install -r requirements.txt
+  echo -e "${GREEN}Agent dependencies installed.${NC}"
+
+  # Install python-socketio if in websocket mode
+  if [ "$websocket_mode" == "websocket" ]; then
+    echo -e "${YELLOW}Installing python-socketio...${NC}"
+    pip install python-socketio
+    echo -e "${GREEN}python-socketio installed.${NC}"
   fi
   
   echo -e "${YELLOW}Running agent in $mode mode...${NC}"
@@ -177,11 +195,11 @@ run_agent() {
   source venv/bin/activate
   
   if [ "$mode" == "step" ] && [ -n "$step" ]; then
-    python client.py --mode step --step "$step" --api-url "$api_url"
+    CI=true PYTHONPATH="${AGENT_DIR}/..:$PYTHONPATH" python client.py --mode step --step "$step" --api-url "$api_url"
   elif [ "$mode" == "step" ]; then
-    python client.py --mode step --api-url "$api_url"
+    CI=true PYTHONPATH="${AGENT_DIR}/..:$PYTHONPATH" python client.py --mode step --api-url "$api_url"
   else
-    python client.py --mode full --api-url "$api_url"
+    CI=true PYTHONPATH="${AGENT_DIR}/..:$PYTHONPATH" python client.py --mode full --api-url "$api_url"
   fi
 }
 
