@@ -166,7 +166,8 @@ def get_step_status():
             "status": step_status.get("status", "pending"),
             "requiresUserInput": step["requiresUserInput"],
             "dependencies": step["dependencies"],
-            "group": step.get("group", "")
+            "group": step.get("group", ""),
+            "message": step_status.get("message") # Added this line
         })
     
     return steps
@@ -201,6 +202,25 @@ def api_config():
     elif request.method == 'POST':
         new_config = request.json
         save_config(new_config)
+
+        # Update status.json with requiresUserInput from new_config
+        status_file = os.path.join(AGENT_DIR, 'status.json')
+        if os.path.exists(status_file):
+            with open(status_file, 'r') as f:
+                status_data = json.load(f)
+        else:
+            status_data = {}
+
+        for step_config in new_config.get('steps', []):
+            step_id = step_config.get('id')
+            if step_id:
+                if step_id not in status_data:
+                    status_data[step_id] = {}
+                status_data[step_id]['requiresUserInput'] = step_config.get('requiresUserInput', False)
+        
+        with open(status_file, 'w') as f:
+            json.dump(status_data, f, indent=2)
+            
         return jsonify({"status": "success"})
 
 @app.route('/api/steps', methods=['GET'])
@@ -294,7 +314,12 @@ def api_run_step(step_id):
         if final_step_state and final_step_state['status'] not in ['failed', 'pending', 'waiting_dependency']:
             return jsonify({"status": "success", "message": f"Step {step_id} processed.", "steps": updated_steps_status})
         else:
-            error_message = f"Step {step_id} may have failed or is in an unexpected state: {final_step_state['status'] if final_step_state else 'unknown'}"
+            detailed_error = ""
+            if final_step_state and final_step_state.get('message'):
+                detailed_error = f" - Details: {final_step_state['message']}"
+            
+            current_status_str = final_step_state['status'] if final_step_state and final_step_state.get('status') else 'unknown'
+            error_message = f"Step {step_id} may have failed or is in an unexpected state: {current_status_str}{detailed_error}"
             return jsonify({"status": "error", "error": error_message, "steps": updated_steps_status}), 500
 
     except ImportError as e:

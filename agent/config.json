@@ -1,83 +1,83 @@
 {
   "steps": [
     {
+      "dependencies": [],
+      "description": "Analyze performance data to identify trends and areas for improvement.",
+      "group": "performance_evaluation",
       "id": "data_analysis",
       "name": "Data Analysis",
-      "description": "Analyze performance data to identify trends and areas for improvement.",
-      "requiresUserInput": true,
-      "dependencies": [],
-      "group": "performance_evaluation"
+      "requiresUserInput": true
     },
     {
-      "id": "evaluation_generation",
-      "name": "Evaluation Generation",
-      "description": "Generate performance evaluations based on the analysis of data and feedback.",
-      "requiresUserInput": false,
       "dependencies": [
         "data_analysis"
       ],
-      "group": "performance_evaluation"
+      "description": "Generate performance evaluations based on the analysis of data and feedback.",
+      "group": "performance_evaluation",
+      "id": "evaluation_generation",
+      "name": "Evaluation Generation",
+      "requiresUserInput": false
     },
     {
+      "dependencies": [
+        "evaluation_generation"
+      ],
+      "description": "Create specific, measurable contribution goals for team members based on performance data.",
+      "group": "performance_evaluation",
       "id": "create_contribution_goal",
       "name": "Create Contribution Goal",
-      "description": "Create specific, measurable contribution goals for team members based on performance data.",
-      "requiresUserInput": false,
+      "requiresUserInput": false
+    },
+    {
       "dependencies": [
         "evaluation_generation"
       ],
-      "group": "performance_evaluation"
-    },
-    {
+      "description": "Create development items to help team members improve their skills and performance.",
+      "group": "performance_evaluation",
       "id": "create_development_item",
       "name": "Create Development Item",
-      "description": "Create development items to help team members improve their skills and performance.",
-      "requiresUserInput": false,
-      "dependencies": [
-        "evaluation_generation"
-      ],
-      "group": "performance_evaluation"
+      "requiresUserInput": false
     },
     {
-      "id": "update_contribution_goal",
-      "name": "Update Contribution Goal",
-      "description": "Update contribution goals based on the progress made by team members.",
-      "requiresUserInput": false,
       "dependencies": [
         "create_contribution_goal"
       ],
-      "group": "monthly_checkins"
+      "description": "Update contribution goals based on the progress made by team members.",
+      "group": "monthly_checkins",
+      "id": "update_contribution_goal",
+      "name": "Update Contribution Goal",
+      "requiresUserInput": true
     },
     {
-      "id": "update_development_item",
-      "name": "Update Development Item",
-      "description": "Update development items based on the progress made by team members.",
-      "requiresUserInput": false,
       "dependencies": [
         "create_development_item"
       ],
-      "group": "monthly_checkins"
+      "description": "Update development items based on the progress made by team members.",
+      "group": "monthly_checkins",
+      "id": "update_development_item",
+      "name": "Update Development Item",
+      "requiresUserInput": true
     },
     {
-      "id": "timely_feedback",
-      "name": "Timely Feedback",
-      "description": "Provide timely feedback to team members based on their performance and progress.",
-      "requiresUserInput": false,
       "dependencies": [
         "update_contribution_goal",
         "update_development_item"
       ],
-      "group": "monthly_checkins"
+      "description": "Provide timely feedback to team members based on their performance and progress.",
+      "group": "monthly_checkins",
+      "id": "timely_feedback",
+      "name": "Timely Feedback",
+      "requiresUserInput": true
     },
     {
-      "id": "coaching",
-      "name": "Coaching",
-      "description": "Provide coaching and support to team members to help them achieve their goals and improve their performance.",
-      "requiresUserInput": true,
       "dependencies": [
         "timely_feedback"
       ],
-      "group": "monthly_checkins"
+      "description": "Provide coaching and support to team members to help them achieve their goals and improve their performance.",
+      "group": "monthly_checkins",
+      "id": "coaching",
+      "name": "Coaching",
+      "requiresUserInput": true
     }
   ]
 }

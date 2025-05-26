@@ -76,31 +76,122 @@ export function useAgentSteps() {
         finalUpdatedSteps = await refreshSteps(); // refreshSteps calls setSteps internally
       }
 
-      const stepNameFromState = finalUpdatedSteps.find(s => s.id === stepId)?.name || stepId;
+      let safeStepName = stepId;
+      try {
+        const step = finalUpdatedSteps.find(s => s.id === stepId);
+        if (step && typeof step.name === 'string') {
+          safeStepName = step.name;
+        } else if (step && step.name !== null && step.name !== undefined) {
+          safeStepName = String(step.name);
+        }
+      } catch (e: any) {
+        console.warn(`[useAgentSteps] Error converting step.name to string for step '${stepId}':`, e);
+        safeStepName = `${stepId} (name error: ${e.message || 'unknown'})`;
+      }
 
-      // Check the 'status' field in the main body of resultData for overall API call success,
-      // and then use finalUpdatedSteps for specific step status.
       if (resultData.status === 'success') {
-        // The API call itself was successful, now check the actual step's status from finalUpdatedSteps
         const currentStepData = finalUpdatedSteps.find(s => s.id === stepId);
-        if (currentStepData?.status === 'completed' || currentStepData?.status === 'in_progress' || currentStepData?.status === 'waiting_input') {
-          addToast(`Step "${stepNameFromState}" processed. Current status: ${currentStepData.status}.`, 'success');
+        let safeCurrentStatus = 'unknown';
+        if (currentStepData && typeof currentStepData.status === 'string') {
+          safeCurrentStatus = currentStepData.status;
+        } else if (currentStepData && currentStepData.status !== null && currentStepData.status !== undefined) {
+          try {
+            safeCurrentStatus = String(currentStepData.status);
+          } catch (e: any) {
+            console.warn(`[useAgentSteps] Error converting currentStepData.status to string for step '${stepId}':`, e);
+            safeCurrentStatus = `(status error: ${e.message || 'unknown'})`;
+          }
+        }
+
+        if (safeCurrentStatus === 'completed' || safeCurrentStatus === 'in_progress' || safeCurrentStatus === 'waiting_input') {
+          addToast(`Step "${safeStepName}" processed. Current status: ${safeCurrentStatus}.`, 'success');
           success = true;
-        } else if (currentStepData?.status === 'failed') {
-          addToast(`Step "${stepNameFromState}" failed. ${resultData.message || ''}`, 'error');
+        } else if (safeCurrentStatus === 'failed') {
+          let safeResultMessage = '';
+          if (resultData && resultData.hasOwnProperty('message')) {
+            const rawMessage = resultData.message;
+            if (typeof rawMessage === 'string') {
+              safeResultMessage = rawMessage;
+            } else if (rawMessage !== null && rawMessage !== undefined) {
+              try {
+                safeResultMessage = String(rawMessage);
+              } catch (e: any) {
+                console.warn(`[useAgentSteps] Error converting resultData.message to string for step '${stepId}' (in failed status block):`, e);
+                safeResultMessage = `(error processing message: ${e.message || 'unknown'})`;
+              }
+            }
+          }
+          addToast(`Step "${safeStepName}" failed. ${safeResultMessage || ''}`, 'error');
           success = false;
         } else {
-           addToast(`Step "${stepNameFromState}" run initiated. Status: ${currentStepData?.status || 'unknown'}. ${resultData.message || ''}`, 'info');
-           success = true; // Or false, depending on how to interpret 'pending' or 'waiting_dependency' after a run command
+           // Safely process resultData.message (already improved by previous fix, ensure consistency)
+           let messageText = '';
+           if (resultData && resultData.hasOwnProperty('message')) {
+             const rawMessage = resultData.message;
+             if (typeof rawMessage === 'string') {
+               messageText = rawMessage;
+             } else if (rawMessage !== null && rawMessage !== undefined) {
+               try {
+                 messageText = String(rawMessage);
+               } catch (e: any) {
+                 console.warn(`[useAgentSteps] Error converting resultData.message to string for step '${stepId}':`, e);
+                 messageText = `(error processing message: ${e.message || 'unknown'})`;
+               }
+             }
+           }
+           addToast(`Step "${safeStepName}" run initiated. Status: ${safeCurrentStatus || 'unknown'}. ${messageText}`, 'info');
+           success = true;
         }
       } else { // resultData.status was 'error' or not 'success'
-        addToast(`Failed to process step "${stepNameFromState}". ${resultData.error || 'Unknown error from server.'}`, 'error');
+        let safeResultError = 'Unknown error from server.';
+        if (resultData && resultData.hasOwnProperty('error')) {
+            const rawError = resultData.error;
+            if (typeof rawError === 'string') {
+                safeResultError = rawError;
+            } else if (rawError !== null && rawError !== undefined) {
+                try {
+                    safeResultError = String(rawError);
+                } catch (e: any) {
+                    console.warn(`[useAgentSteps] Error converting resultData.error to string for step '${stepId}':`, e);
+                    safeResultError = `(error processing server error: ${e.message || 'unknown'})`;
+                }
+            }
+        }
+        addToast(`Failed to process step "${safeStepName}". ${safeResultError}`, 'error');
         success = false;
       }
     } catch (err: any) {
-      const stepNameFromState = finalUpdatedSteps.find(s => s.id === stepId)?.name || stepId; // Use potentially updated steps for name
-      console.error(`Error running step "${stepId}":`, err);
-      addToast(`Error initiating run for step "${stepNameFromState}": ${err.message}`, 'error');
+      // Ensure safeStepName is defined in this scope for the catch block's addToast
+      let stepNameForCatch = stepId;
+      try {
+        const step = finalUpdatedSteps.find(s => s.id === stepId); // finalUpdatedSteps might be from before error
+        if (step && typeof step.name === 'string') {
+          stepNameForCatch = step.name;
+        } else if (step && step.name !== null && step.name !== undefined) {
+          stepNameForCatch = String(step.name);
+        }
+      } catch (e: any) {
+         console.warn(`[useAgentSteps] Error converting step.name to string in catch block for step '${stepId}':`, e);
+         stepNameForCatch = `${stepId} (name error in catch: ${e.message || 'unknown'})`;
+      }
+      console.error(`Error running step "${stepId}":`, err instanceof Error ? err.message : String(err));
+      let errorMessageForToast = 'unknown error';
+      if (err instanceof Error) {
+        errorMessageForToast = err.message;
+      } else if (err && err.hasOwnProperty('message')) {
+        try {
+          errorMessageForToast = String(err.message);
+        } catch (e: any) {
+          errorMessageForToast = `(error processing error message: ${e.message || 'unknown'})`;
+        }
+      } else {
+        try {
+          errorMessageForToast = String(err);
+        } catch (e: any) {
+          errorMessageForToast = `(error converting error to string: ${e.message || 'unknown'})`;
+        }
+      }
+      addToast(`Error initiating run for step "${stepNameForCatch}": ${errorMessageForToast}`, 'error');
       success = false;
       // Ensure steps are refreshed even on error to get latest state if possible
       try {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface ConfigEditorProps {
   config: any;
@@ -11,6 +11,10 @@ interface ConfigEditorProps {
 
 export function ConfigEditor({ config, stepGroups, isLoading, onSave }: ConfigEditorProps) {
   const [editedConfig, setEditedConfig] = useState(config);
+
+  useEffect(() => {
+    setEditedConfig(config);
+  }, [config]);
   
   const handleStepChange = (stepIndex: number, field: string, value: any) => {
     const updatedSteps = [...editedConfig.steps];
@@ -23,7 +27,7 @@ export function ConfigEditor({ config, stepGroups, isLoading, onSave }: ConfigEd
     const currentDependencies = updatedSteps[stepIndex].dependencies || [];
     
     if (currentDependencies.includes(dependencyId)) {
-      updatedSteps[stepIndex].dependencies = currentDependencies.filter(id => id !== dependencyId);
+      updatedSteps[stepIndex].dependencies = currentDependencies.filter((id: string) => id !== dependencyId);
     } else {
       updatedSteps[stepIndex].dependencies = [...currentDependencies, dependencyId];
     }
